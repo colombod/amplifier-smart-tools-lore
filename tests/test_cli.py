@@ -5,7 +5,7 @@ import pytest
 from typer.testing import CliRunner
 
 from lore import cli, lib
-from lore.schemas import Answer, CheckResult, Freshness, PageEntry, Reachability, WikiIndex
+from lore.schemas import Answer, CheckResult, DriftReport, Freshness, PageEntry, Reachability, ReadResult, WikiIndex
 
 runner = CliRunner()
 
@@ -194,6 +194,60 @@ def test_explain_material_file_with_invalid_utf8_is_a_named_failure_naming_encod
     assert exit_code == 1
     assert "--material-file" in captured.err
     assert "UTF-8" in captured.err
+
+
+def test_read_passes_the_page_argument_through_unconverted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI must not decide whether a page selector is a number or a title substring; that
+    decision belongs to the library (`store._resolve_page`), so the raw string passes through."""
+    captured: dict[str, object] = {}
+
+    def _fake_read(repo: str, page: object, start: int, limit: int) -> ReadResult:
+        captured["page"] = page
+        return ReadResult(
+            repo=repo,
+            page_number=7,
+            page_title="Seven",
+            path="pages/007-seven.md",
+            text="seven",
+            start=0,
+            returned_characters=5,
+            total_characters=5,
+            truncated=False,
+        )
+
+    monkeypatch.setattr(lib, "read", _fake_read)
+
+    result = runner.invoke(cli.app, ["read", "owner/repo", "7"])
+
+    assert result.exit_code == 0
+    assert captured["page"] == "7"
+    assert type(captured["page"]) is str
+
+
+def test_drift_passes_the_page_option_through_unconverted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same contract as `read`: `--page` is passed through, never normalized by the CLI."""
+    captured: dict[str, object] = {}
+
+    def _fake_drift(repo: str, page: object, timeout_seconds: float) -> DriftReport:
+        captured["page"] = page
+        return DriftReport(
+            repo=repo,
+            indexed_sha="abc123",
+            head_sha="def456",
+            pages=[],
+            verdict="intact",
+            changed_file_count=0,
+            comparison_complete=True,
+            summary="ok",
+        )
+
+    monkeypatch.setattr(lib, "drift", _fake_drift)
+
+    result = runner.invoke(cli.app, ["drift", "owner/repo", "--page", "7"])
+
+    assert result.exit_code == 0
+    assert captured["page"] == "7"
+    assert type(captured["page"]) is str
 
 
 def test_check_renders_an_unsatisfied_optional_prerequisite_as_optional_not_fail(

@@ -186,7 +186,7 @@ def read(
     json_output: Annotated[bool, typer.Option("--json", help="Print the result as JSON.")] = False,
 ) -> None:
     """Read a bounded slice of one cached wiki page. Deterministic."""
-    result = lib.read(repo, _page_argument(page), start=start, limit=limit)
+    result = lib.read(repo, page, start=start, limit=limit)
     if json_output:
         typer.echo(result.model_dump_json(indent=2))
         return
@@ -247,7 +247,7 @@ def drift(
     json_output: Annotated[bool, typer.Option("--json", help="Print the result as JSON.")] = False,
 ) -> None:
     """Whether a cached wiki's pages still match the repository, page by page. Deterministic."""
-    result = lib.drift(repo, page=_page_argument(page) if page is not None else None, timeout_seconds=timeout_seconds)
+    result = lib.drift(repo, page=page, timeout_seconds=timeout_seconds)
     if json_output:
         typer.echo(result.model_dump_json(indent=2))
         return
@@ -378,14 +378,6 @@ def _echo_answer(result: Answer) -> None:
         typer.echo("At-head file status:")
         for entry in result.at_head_files:
             typer.echo(f"  [{entry.status}] {entry.path}")
-
-
-def _page_argument(value: str) -> int | str:
-    """`value` as a page number when it looks like one, otherwise the title substring itself."""
-    try:
-        return int(value)
-    except ValueError:
-        return value
 
 
 def main() -> int:

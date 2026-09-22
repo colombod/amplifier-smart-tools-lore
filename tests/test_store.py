@@ -167,6 +167,25 @@ def test_read_page_by_number_and_by_title_substring() -> None:
     assert by_title == by_number
 
 
+def test_read_page_by_int_and_by_the_matching_numeric_string_are_equivalent() -> None:
+    """`page` is `int | str` at every surface, and every CLI argument arrives as a string.
+
+    Resolving whether a string means a page number or a title substring is the library's job
+    (`store._resolve_page`/`_normalize_page`), not a wrapper's: a Python caller passing the
+    string "7" must get exactly what a shell caller passing the argument `7` gets.
+    """
+    store.write_wiki(
+        "owner/repo",
+        "# Page: First\nfirst\n# Page: Second\nsecond\n",
+        _freshness("owner/repo"),
+    )
+
+    by_int = store.read_page("owner/repo", 2)
+    by_numeric_string = store.read_page("owner/repo", "2")
+
+    assert by_numeric_string == by_int
+
+
 def test_read_page_ambiguous_title_names_the_candidates() -> None:
     store.write_wiki(
         "owner/repo",

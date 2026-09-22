@@ -102,14 +102,21 @@ def _raise_for_status(response: httpx.Response, context: str) -> None:
     if status == httpx.codes.UNAUTHORIZED:
         raise LoreError(f"Context7 rejected the {API_KEY_ENV} key. Check its value.")
     if status in (httpx.codes.FORBIDDEN, httpx.codes.PAYMENT_REQUIRED):
-        raise LoreError(f"Context7's plan does not allow {context} (HTTP {status}).")
+        raise LoreError(
+            f"Context7's plan does not allow {context} (HTTP {status}). Check your plan's access and any "
+            f"spending limit at https://context7.com, and confirm {API_KEY_ENV} is set correctly if your "
+            "plan requires a key."
+        )
     if status == httpx.codes.NOT_FOUND:
-        raise LoreError(f"Context7 has no {context}.")
+        raise LoreError(f"Context7 has no {context}. Check the library name for typos, or search for it first.")
     if status == httpx.codes.TOO_MANY_REQUESTS:
         retry_after = response.headers.get("Retry-After")
         suffix = f" Retry after {retry_after} seconds." if retry_after else ""
         raise LoreError(f"Context7 rate limited {context}.{suffix}")
-    raise LoreError(f"Context7 returned HTTP {status} for {context}: {response.text[:200]}")
+    raise LoreError(
+        f"Context7 returned HTTP {status} for {context}: {response.text[:200]}. Retry; if it keeps "
+        "failing, check https://context7.com."
+    )
 
 
 def _timeout(read_seconds: float) -> httpx.Timeout:

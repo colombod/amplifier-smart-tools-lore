@@ -239,15 +239,32 @@ def _repo_slug(repo: str) -> str:
     return repo.replace("/", "__")
 
 
+def _normalize_page(page: int | str) -> int | str:
+    """`page` as a page number when it already is one, or a string that reads as one.
+
+    A page selector is `int | str` at every surface, CLI included, and every CLI argument
+    arrives as a string. Resolving "does this string mean a number or a title substring" is
+    the one place that decision must be made, so a Python caller passing the string "7" and
+    a shell caller passing the argument `7` resolve to the same page.
+    """
+    if isinstance(page, int):
+        return page
+    try:
+        return int(page)
+    except ValueError:
+        return page
+
+
 def _resolve_page(index: WikiIndex, page: int | str) -> PageEntry:
     """The page `page` names, by number or by a case-insensitive title substring."""
-    if isinstance(page, int):
+    resolved = _normalize_page(page)
+    if isinstance(resolved, int):
         for entry in index.pages:
-            if entry.number == page:
+            if entry.number == resolved:
                 return entry
-        raise LoreError(f"Page {page} does not exist for '{index.repo}'. Pages range from 1 to {len(index.pages)}.")
+        raise LoreError(f"Page {resolved} does not exist for '{index.repo}'. Pages range from 1 to {len(index.pages)}.")
 
-    needle = page.lower()
+    needle = resolved.lower()
     matches = [entry for entry in index.pages if needle in entry.title.lower()]
     if not matches:
         titles = ", ".join(entry.title for entry in index.pages)
