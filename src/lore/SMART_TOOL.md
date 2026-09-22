@@ -68,8 +68,14 @@ together, and how it is meant to be driven.
 
 - DeepWiki covers public repositories, and only those it has indexed. An unindexed repository
   is reported as such, with the URL that triggers indexing, rather than answered around.
-- A DeepWiki index can trail the repository badly. Every model-backed answer carries the
-  measured gap, and a `stale` verdict means API details in the answer may have moved.
+- A DeepWiki index can trail the repository badly. `explain` measures drift for the cached
+  wiki's own pages, not just the repository-wide gap: a page whose cited files no longer
+  resolve makes it **refuse** rather than answer around a dead citation; a page whose cited
+  files were merely edited still answers, with both the model and the reader told which
+  files to treat with caution; a page whose citations are untouched carries no caveat at
+  all, whatever the repository-wide gap. `--at-head` reads cited files directly from the
+  repository's live head instead of trusting the wiki. `howto` treats Context7's own `state`
+  and `lastUpdateDate` the same way.
 - The model-backed capabilities answer only from what was retrieved in that run. What the
   sources did not cover comes back under `unanswered` rather than filled in.
 - Grounding gives source fidelity, not omniscience: a citation means the sources said it,

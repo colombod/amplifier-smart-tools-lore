@@ -4,7 +4,14 @@ from lore.grounding import GROUNDING_RULE
 from lore.schemas import LibraryRef
 
 
-def build_prompt(library: str, task: str, resolved: LibraryRef, context7_docs: str, deepwiki_answer: str | None) -> str:
+def build_prompt(
+    library: str,
+    task: str,
+    resolved: LibraryRef,
+    context7_docs: str,
+    deepwiki_answer: str | None,
+    docs_note: str | None = None,
+) -> str:
     """The full prompt for one `howto` call, carrying only the material retrieved for `library`.
 
     Args:
@@ -15,6 +22,10 @@ def build_prompt(library: str, task: str, resolved: LibraryRef, context7_docs: s
         deepwiki_answer: DeepWiki's own answer about `resolved`'s design, when `resolved` is
             backed by a GitHub repository; `None` otherwise, in which case its section is
             omitted rather than left carrying nothing.
+        docs_note: An instruction naming that Context7's documentation trails the repository's
+            live head past the aging threshold, when it does; `None` when it does not (or
+            `resolved` is not backed by a GitHub repository, in which case there is nothing
+            live to compare it against).
 
     Returns:
         The prompt text, carrying `GROUNDING_RULE` and nothing outside what was retrieved.
@@ -23,9 +34,10 @@ def build_prompt(library: str, task: str, resolved: LibraryRef, context7_docs: s
         f"You are explaining how to use the library '{library}' (Context7 resolved this to "
         f"'{resolved.id}') to accomplish a task."
     )
-    sections = [
-        intro,
-        GROUNDING_RULE,
+    sections = [intro, GROUNDING_RULE]
+    if docs_note is not None:
+        sections.append(docs_note)
+    sections += [
         f"## Task\n{task}",
         f"## Retrieved: Context7 documentation for {resolved.id}\n{context7_docs}",
     ]

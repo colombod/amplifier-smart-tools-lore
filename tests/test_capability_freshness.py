@@ -83,11 +83,11 @@ def test_days_behind_is_none_when_either_date_is_unreadable() -> None:
 
 
 def test_parse_moment_reads_a_date_only_string_and_a_full_timestamp() -> None:
-    assert core._parse_moment("2026-07-20") is not None
-    assert core._parse_moment("2026-07-20T12:00:00Z") is not None
-    assert core._parse_moment(None) is None
-    assert core._parse_moment("") is None
-    assert core._parse_moment("not a date") is None
+    assert core.parse_moment("2026-07-20") is not None
+    assert core.parse_moment("2026-07-20T12:00:00Z") is not None
+    assert core.parse_moment(None) is None
+    assert core.parse_moment("") is None
+    assert core.parse_moment("not a date") is None
 
 
 def test_summary_unknown_names_the_unmeasured_reason() -> None:

@@ -5,6 +5,15 @@ library id names a GitHub repository, its freshness is also measured and DeepWik
 answer about that repository's design is retrieved alongside it. When it does not (a
 Context7 `websites`/`llmstxt` style entry), the returned `Freshness` reports what Context7
 itself publishes instead of a commit-level measurement no such entry has.
+
+Context7 publishes its own freshness signals, and this module acts on them rather than only
+reporting them. A `state` other than `finalized` means the library is not fully indexed, so
+this refuses rather than answer from a partial index. Context7 exposes no per-page source
+provenance the way a DeepWiki wiki does, so there is no `broken` equivalent here: the only
+signal available is `last_update_date` against the repository's live head, and when that gap
+passes `DEFAULT_CONTEXT7_DOCS_AGING_DAYS`, this gets the same treatment `explain` gives a
+`drifted` page: still answered, but the model is told which source is aging, and the reader
+sees it in the caveat.
 """
 
 from datetime import UTC, datetime
@@ -14,7 +23,7 @@ from lore.capabilities.howto.prompt import build_prompt, build_prompt_from_mater
 from lore.grounding import ANSWER_OUTPUT_SCHEMA, answer_from_result
 from lore.intelligence.interface import Intelligence, default_intelligence
 from lore.intelligence.schemas import AgentRequest
-from lore.schemas import DEFAULT_INTELLIGENCE_MODEL, Answer, Freshness, LibraryRef, ReasoningEffort
+from lore.schemas import DEFAULT_INTELLIGENCE_MODEL, Answer, Freshness, LibraryRef, LoreError, ReasoningEffort
 from lore.sources import context7, deepwiki
 
 # AgentRequest.timeout_seconds must be a positive int; a caller passing a sub-second float
@@ -25,6 +34,14 @@ MINIMUM_TIMEOUT_SECONDS = 1
 # `/namespace/slug` for everything else it indexes. These are the non-repository namespaces
 # Context7 documents; an id under one of them is never a GitHub repository.
 NON_REPOSITORY_NAMESPACES = frozenset({"websites", "llmstxt"})
+
+FINALIZED_STATE = "finalized"
+
+# Context7's own `last_update_date` can trail a GitHub-backed library's live head by a wide
+# margin even while `state` is `finalized`. Matches `AGING_DAYS_LIMIT` in
+# `lore.capabilities.freshness.core`: the same 30-day cutoff already used to decide when
+# DeepWiki's index is worth a caveat, applied here to Context7's own documentation snapshot.
+DEFAULT_CONTEXT7_DOCS_AGING_DAYS = 30
 
 
 def is_github_repo_id(library_id: str) -> bool:
@@ -104,6 +121,68 @@ def non_repository_freshness(resolved: LibraryRef) -> Freshness:
     )
 
 
+def _require_finalized(resolved: LibraryRef) -> None:
+    """Raise when Context7 reports `resolved` is not fully indexed.
+
+    A `state` other than `finalized` (Context7 uses values such as `parsing`, `error`, or an
+    in-progress state while a library is still being processed) means the retrieved
+    documentation may be partial or in flux; answering from it silently would be the same
+    mistake a stale wiki makes. `None` is left untreated as a failure: a missing `state` on an
+    older or thin Context7 response is already handled elsewhere in this module (see
+    `non_repository_freshness`) as an unknown to report, not an absence to refuse on.
+
+    Args:
+        resolved: The library Context7 resolved.
+
+    Raises:
+        LoreError: `resolved.state` is present and is not `finalized`.
+    """
+    if resolved.state is not None and resolved.state != FINALIZED_STATE:
+        raise LoreError(
+            f"Context7 reports '{resolved.id}' is not fully indexed (state: '{resolved.state}'). "
+            "Retry shortly once indexing finishes."
+        )
+
+
+def _context7_docs_lag_days(resolved: LibraryRef, head_date: str | None) -> int | None:
+    """Days Context7's `last_update_date` for `resolved` trails `head_date`, or `None` when unmeasurable."""
+    published = freshness_core.parse_moment(resolved.last_update_date)
+    head = freshness_core.parse_moment(head_date)
+    if published is None or head is None:
+        return None
+    return max((head - published).days, 0)
+
+
+def _context7_docs_note(resolved: LibraryRef, lag_days: int | None, threshold_days: int) -> str:
+    """Instruction naming Context7's documentation lag, used both in the prompt and the caveat.
+
+    `lag_days` is `None` when the comparison could not be made at all (an unparsable or
+    missing date on either side), which is treated with the same caution as a measured lag
+    past the threshold, never as evidence the documentation is current.
+    """
+    if lag_days is None:
+        return (
+            f"Context7's documentation for '{resolved.id}' could not be compared against the "
+            "repository's live head (a date on one side could not be read). Mark any specific "
+            "signature, flag, or API detail from it as needing verification at the repository's "
+            "current head."
+        )
+    return (
+        f"Context7's documentation for '{resolved.id}' was last updated {resolved.last_update_date}, "
+        f"{lag_days} day(s) behind the repository's live head, past the {threshold_days}-day threshold. "
+        "Mark any specific signature, flag, or API detail from it as needing verification at the "
+        "repository's current head."
+    )
+
+
+def _with_docs_note_caveat(answer: Answer, docs_note: str | None) -> Answer:
+    """`answer`, with `docs_note` folded into its caveat, when there is one to fold in."""
+    if docs_note is None:
+        return answer
+    combined = docs_note if answer.caveat is None else f"{answer.caveat} {docs_note}"
+    return answer.model_copy(update={"caveat": combined})
+
+
 def howto(
     library: str,
     task: str,
@@ -111,6 +190,7 @@ def howto(
     reasoning_effort: ReasoningEffort = "low",
     timeout_seconds: float = 300.0,
     material: str | None = None,
+    context7_docs_aging_days: int = DEFAULT_CONTEXT7_DOCS_AGING_DAYS,
     intelligence: Intelligence | None = None,
 ) -> Answer:
     """How to use `library` to accomplish `task`.
@@ -126,6 +206,10 @@ def howto(
             this call. When `library` resolves to a GitHub-backed library, its freshness is still
             measured; when it does not, the returned `Freshness` is `unknown`, naming that the
             material was caller-supplied rather than silently reporting it as current.
+        context7_docs_aging_days: How many days Context7's `last_update_date` may trail a
+            GitHub-backed library's live head before its documentation is treated with the
+            same caution as a `drifted` DeepWiki page. Ignored when `library` does not resolve
+            to a GitHub-backed library, or `material` is given.
         intelligence: The implementation to run the synthesis through. Defaults to `default_intelligence()`.
 
     Returns:
@@ -133,14 +217,18 @@ def howto(
         material did not cover, a `Freshness` (measured against the repository when Context7
         resolved a GitHub-backed library, otherwise Context7's own freshness fields, or, with
         caller-supplied material and no repository, an `unknown` record naming that), and a
-        `caveat` derived from that `Freshness`.
+        `caveat` derived from that `Freshness`, extended with a note when Context7's own
+        documentation trails the repository's live head past `context7_docs_aging_days`.
 
     Raises:
-        LoreError: Context7 has no library matching `library`, a retrieval request failed,
-            the intelligence implementation cannot run, or it produced no usable answer.
+        LoreError: Context7 has no library matching `library`, Context7 reports the resolved
+            library is not fully indexed, a retrieval request failed, the intelligence
+            implementation cannot run, or it produced no usable answer.
     """
     engine = intelligence or default_intelligence()
     engine.preflight()
+
+    docs_note: str | None = None
 
     if material is not None:
         # Caller-supplied material IS the ground, so nothing is resolved or retrieved. Resolving
@@ -151,6 +239,7 @@ def howto(
         prompt = build_prompt_from_material(library, task, resolved, material)
     else:
         resolved = context7.resolve_library(library, task, timeout_seconds=timeout_seconds)
+        _require_finalized(resolved)
         github_backed = is_github_repo_id(resolved.id)
         context_docs = context7.fetch_context(resolved.id, task, timeout_seconds=timeout_seconds)
         deepwiki_answer: str | None = None
@@ -159,9 +248,12 @@ def howto(
             measured = freshness_core.measure(repo_slug, timeout_seconds=min(timeout_seconds, 30.0))
             ref = freshness_core.parse_repo(repo_slug)
             deepwiki_answer = deepwiki.ask(ref, task, timeout_seconds=timeout_seconds)
+            lag_days = _context7_docs_lag_days(resolved, measured.head_date)
+            if lag_days is None or lag_days > context7_docs_aging_days:
+                docs_note = _context7_docs_note(resolved, lag_days, context7_docs_aging_days)
         else:
             measured = non_repository_freshness(resolved)
-        prompt = build_prompt(library, task, resolved, context_docs, deepwiki_answer)
+        prompt = build_prompt(library, task, resolved, context_docs, deepwiki_answer, docs_note=docs_note)
 
     request = AgentRequest(
         prompt=prompt,
@@ -171,4 +263,5 @@ def howto(
         timeout_seconds=max(MINIMUM_TIMEOUT_SECONDS, int(timeout_seconds)),
     )
     result = engine.run(request)
-    return answer_from_result(task, library, result, measured)
+    answer = answer_from_result(task, library, result, measured)
+    return _with_docs_note_caveat(answer, docs_note)

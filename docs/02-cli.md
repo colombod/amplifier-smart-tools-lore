@@ -91,17 +91,33 @@ lore search REPO PATTERN [--max-hits N] [--json]
 `lib.search(repo, pattern, max_hits)`. Without `--json`, the total hit count and one line per
 hit. With `--json`, the full `SearchResult` model.
 
+## lore drift
+
+```bash
+lore drift REPO [--page PAGE] [--timeout-seconds SECONDS] [--json]
+```
+
+`lib.drift(repo, page, timeout_seconds)`, where `PAGE` is converted to an integer when it
+parses as one, otherwise passed through as a title substring, exactly as `lore read`'s `PAGE`
+is. Without `--json`, the report verdict and summary, then one block per page that is `broken`
+or `drifted` (removed files named first, then that page's own summary), then a count of pages
+intact or unknown that are not shown in detail. With `--json`, the full `DriftReport` model.
+
 ## lore explain
 
 ```bash
-lore explain REPO QUESTION [--model MODEL] [--reasoning-effort EFFORT] [--timeout-seconds SECONDS] [--material-file PATH] [--json]
+lore explain REPO QUESTION [--model MODEL] [--reasoning-effort EFFORT] [--timeout-seconds SECONDS] [--material-file PATH] [--at-head] [--at-head-read-limit N] [--json]
 ```
 
-`lib.explain(repo, question, model, reasoning_effort, timeout_seconds, material)`, where
-`--material-file` is read and its contents passed as `material`; reading a path is the CLI's
-own convenience, the library takes the content directly. Without `--json`, the caveat first
-when there is one, then the answer, then citations, then anything unanswered. With `--json`,
-the full `Answer` model.
+`lib.explain(repo, question, model, reasoning_effort, timeout_seconds, material, at_head, at_head_read_limit)`,
+where `--material-file` is read and its contents passed as `material`; reading a path is the
+CLI's own convenience, the library takes the content directly. Before synthesis, measures
+per-page drift for the cached wiki: a `broken` verdict exits non-zero naming the broken
+pages, the files, and how to proceed, before any model call is made. `--at-head` grounds on
+source read directly from the repository's head commit instead of the wiki, bounded by
+`--at-head-read-limit` total characters. Without `--json`, the caveat first when there is
+one, then the answer, then citations, then anything unanswered. With `--json`, the full
+`Answer` model.
 
 ## lore howto
 

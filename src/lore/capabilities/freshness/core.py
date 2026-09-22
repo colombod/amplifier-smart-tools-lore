@@ -141,18 +141,19 @@ def _days_behind(indexed_date: str | None, head_date: str | None) -> int | None:
 
     `None` when either date cannot be read, which is a reported unknown rather than a guess.
     """
-    indexed_moment = _parse_moment(indexed_date)
-    head_moment = _parse_moment(head_date)
+    indexed_moment = parse_moment(indexed_date)
+    head_moment = parse_moment(head_date)
     if indexed_moment is None or head_moment is None:
         return None
     return max((head_moment - indexed_moment).days, 0)
 
 
-def _parse_moment(value: str | None) -> datetime | None:
+def parse_moment(value: str | None) -> datetime | None:
     """`value` as a timezone-aware `datetime`, or `None` when it is not a date lore recognizes.
 
     Covers both shapes this module receives: DeepWiki's normalized `YYYY-MM-DD`, and GitHub's
-    full `YYYY-MM-DDTHH:MM:SSZ` commit timestamps.
+    full `YYYY-MM-DDTHH:MM:SSZ` commit timestamps. Public: `lore.capabilities.howto.core` also
+    uses it, to compare Context7's `last_update_date` against a repository's live head date.
     """
     if not value:
         return None

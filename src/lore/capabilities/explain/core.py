@@ -1,21 +1,57 @@
 """Explain: how a project works, its architecture, and how its pieces are wired.
 
-Retrieves DeepWiki's own topic map and its own answer to the question, then synthesizes
-both into a grounded `Answer` through `Intelligence`. The model may use only what was
-retrieved in this run; nothing it remembers from training is allowed into the answer.
+Selects the wiki pages that plausibly ground the question (`lore.selection`, a no-model
+relevance heuristic), retrieves their text and DeepWiki's own answer to the question, then
+synthesizes both into a grounded `Answer` through `Intelligence`. The model may use only what
+was retrieved in this run; nothing it remembers from training is allowed into the answer.
+
+A stale index and a current one used to take the same path to synthesis: only the caveat
+text differed. That let a citation to a file GitHub reports removed or renamed ground an
+answer as if it still existed. Before synthesis, this module measures per-page drift for the
+pages that will ground the answer (`lore.capabilities.drift`) and acts on it: a `broken`
+verdict refuses rather than answering around a citation that does not resolve; `drifted` or
+`unknown` tells the model, in the prompt, which specific files to treat with caution;
+`intact` answers with no staleness caveat at all, whatever the commit count. Critically, this
+gate is scoped to the SELECTED pages, never every page in the wiki: a repository can have
+many pages and only a few broken ones, and a question those broken pages have nothing to do
+with must still answer normally, however far behind the repository the broken pages make it
+look overall (`DriftReport.verdict` is a whole-wiki worst-page verdict; the right input to a
+per-question gate is the worst verdict among only the pages that ground THIS question).
+`--at-head` bypasses the wiki entirely and grounds the answer in the selected pages' cited
+files' own current content, read straight from the repository at its head commit.
 """
 
-from lore.capabilities.explain.prompt import build_prompt, build_prompt_from_material
+from lore import drift as lore_drift
+from lore import selection as lore_selection
+from lore import store
+from lore.capabilities.drift import core as drift_core
+from lore.capabilities.explain.prompt import build_prompt, build_prompt_at_head, build_prompt_from_material
+from lore.capabilities.fetch import core as fetch_core
 from lore.capabilities.freshness import core as freshness_core
 from lore.grounding import ANSWER_OUTPUT_SCHEMA, answer_from_result
 from lore.intelligence.interface import Intelligence, default_intelligence
 from lore.intelligence.schemas import AgentRequest
-from lore.schemas import DEFAULT_INTELLIGENCE_MODEL, Answer, LoreError, ReasoningEffort
-from lore.sources import deepwiki
+from lore.schemas import (
+    DEFAULT_INTELLIGENCE_MODEL,
+    DEFAULT_READ_LIMIT,
+    Answer,
+    DriftReport,
+    Freshness,
+    LoreError,
+    PageEntry,
+    ReasoningEffort,
+    RepoRef,
+)
+from lore.sources import deepwiki, github
 
 # AgentRequest.timeout_seconds must be a positive int; a caller passing a sub-second float
 # still gets a request the schema accepts rather than a validation error of our own making.
 MINIMUM_TIMEOUT_SECONDS = 1
+
+# A page's own citations must be read whole to extract every one, never a bounded slice:
+# `store.read_page` caps and truncates by construction, and drift/citation extraction must
+# see every citation on the page. Matches `lore.capabilities.drift.core._FULL_PAGE_LIMIT`.
+_FULL_PAGE_LIMIT = 100_000_000
 
 
 def explain(
@@ -25,18 +61,35 @@ def explain(
     reasoning_effort: ReasoningEffort = "low",
     timeout_seconds: float = 300.0,
     material: str | None = None,
+    at_head: bool = False,
+    at_head_read_limit: int = DEFAULT_READ_LIMIT,
     intelligence: Intelligence | None = None,
 ) -> Answer:
     """How `repo` works: its architecture, design, and how its pieces are wired.
 
     Measures freshness first, since `repo` always names a repository to measure it against.
     When `material` is not given, a repository DeepWiki has never indexed has nothing to
-    ground an answer in, so that case raises before a model is ever asked; otherwise this
-    retrieves DeepWiki's own topic map and its own answer to `question`, then synthesizes
-    both through `Intelligence`, grounded only in that retrieved material. When `material` is
-    given, it replaces DeepWiki's retrieval entirely (nothing is fetched, and the
-    never-indexed guard is skipped, since the caller already supplied something to ground the
-    answer in) and citations grounded in it are attributed to the caller rather than DeepWiki.
+    ground an answer in, so that case raises before a model is ever asked.
+
+    Otherwise this selects the cached wiki pages that plausibly ground `question`
+    (`lore.selection.select_pages`, a no-model relevance heuristic over page titles and
+    bodies), fetching the wiki to the cache first when it is not already there. Before
+    synthesis, it measures per-page drift for the SELECTED pages only, never the whole wiki:
+    a page whose cited files no longer resolve makes this raise rather than answer around it,
+    naming only the selected broken page(s); a page whose cited files were merely edited adds
+    an instruction to the model naming exactly which files to treat with caution, and the
+    usual staleness caveat; a page whose citations are untouched answers with no caveat at
+    all, however many commits the repository is ahead, and however many OTHER pages in the
+    same wiki are broken or drifted. When no page can be identified as grounding `question`,
+    drift is reported as `unknown` (never silently passed, and never a refusal on pages
+    nothing established as relevant) and the answer proceeds with a caveat saying so.
+    `at_head` skips the wiki's own content entirely and grounds the answer in the selected
+    pages' cited files, read directly from the repository at its live head commit instead.
+
+    When `material` is given, it replaces DeepWiki's retrieval entirely (nothing is fetched,
+    drift is not measured, and the never-indexed guard is skipped, since the caller already
+    supplied something to ground the answer in) and citations grounded in it are attributed
+    to the caller rather than DeepWiki.
 
     Args:
         repo: A GitHub repository, as `owner/name` or a full `https://github.com/owner/name` URL.
@@ -47,17 +100,24 @@ def explain(
         material: Retrieved material supplied directly by the caller, used in place of DeepWiki's
             own retrieval for this call. `repo`'s freshness is still measured and attached to the
             returned `Answer` either way.
+        at_head: Ground the answer in the cited files' own content, read directly from `repo`
+            at its live head commit, instead of DeepWiki's index. Ignored when `material` is given.
+        at_head_read_limit: Maximum total characters of head-commit source to fetch when
+            `at_head` is set; cited files past this budget are named as left out rather than fetched.
         intelligence: The implementation to run the synthesis through. Defaults to `default_intelligence()`.
 
     Returns:
         An `Answer` carrying the synthesized text, its citations, anything the retrieved
-        material did not cover, the measured `Freshness`, and a `caveat` when the index
-        trails the repository.
+        material did not cover, the measured `Freshness`, and a `caveat`. With `at_head`, the
+        reported `Freshness` describes the material actually used (the repository's live
+        head), not the wiki's own staleness.
 
     Raises:
         LoreError: `repo` does not parse, DeepWiki has no indexed wiki for it and no `material`
-            was supplied, the intelligence implementation cannot run, or it produced no usable
-            answer.
+            was supplied, a page selected as grounding the question cites a file GitHub
+            reports removed or renamed (naming the pages, the files, and how to proceed),
+            `at_head` was requested but the repository's live head commit could not be read,
+            the intelligence implementation cannot run, or it produced no usable answer.
     """
     engine = intelligence or default_intelligence()
     engine.preflight()
@@ -68,13 +128,49 @@ def explain(
         # answer against an index that does not exist would only invite a guess.
         raise LoreError(measured.summary)
 
-    if material is None:
-        ref = freshness_core.parse_repo(repo)
-        structure = deepwiki.read_wiki_structure(ref, timeout_seconds=timeout_seconds)
-        deepwiki_answer = deepwiki.ask(ref, question, timeout_seconds=timeout_seconds)
-        prompt = build_prompt(repo, question, structure, deepwiki_answer)
-    else:
+    drift_report: DriftReport | None = None
+    head_ref: str | None = None
+    freshness_for_answer = measured
+
+    if material is not None:
         prompt = build_prompt_from_material(repo, question, material)
+    elif at_head:
+        ref = freshness_core.parse_repo(repo)
+        if measured.head_sha is None:
+            raise LoreError(
+                f"--at-head has no commit to read '{repo}' at: its live head commit could not be "
+                f"measured. {measured.summary}"
+            )
+        _ensure_cached(repo, ref, measured, timeout_seconds)
+        index = store.load_index(repo)
+        selected = lore_selection.select_pages(index, question)
+        # Selection can come up empty for an unusual question; --at-head reads current source
+        # directly from GitHub regardless (there is no staleness risk to guard against here,
+        # unlike the drift gate below), so falling back to every cited file across the wiki is
+        # a safe, conservative default rather than a hard failure.
+        cited = _cited_files(repo, selected or index.pages)
+        if not cited:
+            raise LoreError(
+                f"'{repo}'s cached wiki cites no source files, so --at-head has nothing to fetch at head. "
+                "Rerun without --at-head to ground the answer in DeepWiki's own retrieval instead."
+            )
+        included, excluded, missing = _fetch_at_head(ref, measured.head_sha, cited, at_head_read_limit, timeout_seconds)
+        prompt = build_prompt_at_head(repo, question, measured.head_sha, included, excluded, missing)
+        freshness_for_answer = _at_head_freshness(measured)
+        head_ref = measured.head_sha
+    else:
+        ref = freshness_core.parse_repo(repo)
+        _ensure_cached(repo, ref, measured, timeout_seconds)
+        whole_wiki_drift = drift_core.drift(repo, timeout_seconds=min(timeout_seconds, 60.0))
+        index = store.load_index(repo)
+        selected = lore_selection.select_pages(index, question)
+        drift_report = _scoped_drift(repo, whole_wiki_drift, selected)
+        if drift_report.verdict == "broken":
+            raise LoreError(_broken_drift_message(ref, repo, question, drift_report))
+        pages_text = _read_selected_pages(repo, selected)
+        deepwiki_answer = deepwiki.ask(ref, question, timeout_seconds=timeout_seconds)
+        note = _drift_note(drift_report) if drift_report.verdict in ("drifted", "unknown") else None
+        prompt = build_prompt(repo, question, pages_text, deepwiki_answer, drift_note=note)
 
     request = AgentRequest(
         prompt=prompt,
@@ -84,4 +180,226 @@ def explain(
         timeout_seconds=max(MINIMUM_TIMEOUT_SECONDS, int(timeout_seconds)),
     )
     result = engine.run(request)
-    return answer_from_result(question, repo, result, measured)
+    return answer_from_result(
+        question, repo, result, freshness_for_answer, drift_report=drift_report, head_ref=head_ref
+    )
+
+
+def _ensure_cached(repo: str, ref: RepoRef, measured: Freshness, timeout_seconds: float) -> None:
+    """Make sure `repo`'s wiki is cached at the commit `measured` reports indexed, fetching it if not.
+
+    Drift and cited-file extraction both read the cached wiki from disk; `explain` itself
+    never required a `fetch` before this gate existed, so it makes the one call `fetch` would,
+    reusing the cache when one already matches `measured.indexed_sha`.
+    """
+    fetch_core.fetch(repo, ref, measured, refresh=False, timeout_seconds=timeout_seconds)
+
+
+def _cited_files(repo: str, pages: list[PageEntry]) -> list[str]:
+    """Every file `pages` cite, in page order, deduplicated.
+
+    The set `--at-head` fetches at the repository's live head in place of the wiki's own
+    content. Scoped to `pages` (normally the pages selected as grounding the question) rather
+    than every page in the wiki: citing files from unrelated pages would fetch source no
+    answer needs.
+    """
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for entry in pages:
+        read_result = store.read_page(repo, entry.number, limit=_FULL_PAGE_LIMIT)
+        for path in lore_drift.cited_files(read_result.text):
+            if path not in seen:
+                seen.add(path)
+                ordered.append(path)
+    return ordered
+
+
+def _scoped_drift(repo: str, whole_wiki_drift: DriftReport, selected: list[PageEntry]) -> DriftReport:
+    """`whole_wiki_drift`, scoped to the pages actually selected as grounding the question.
+
+    `DriftReport.verdict` is the worst page verdict across the WHOLE cached wiki, which is the
+    right read for `lore drift` reporting on the wiki as a whole, but the wrong input to a gate
+    about one question: a wiki with many pages and a few broken ones must not refuse a question
+    those broken pages have nothing to do with. This rebuilds the report from only the selected
+    pages' already-measured per-page drift (`whole_wiki_drift.pages`), so the returned verdict,
+    and any refusal built from it, can never name a page nothing established as relevant.
+
+    Args:
+        repo: The repository the report is for.
+        whole_wiki_drift: The unscoped `DriftReport` covering every cached page.
+        selected: The pages selected as grounding the question (`lore.selection.select_pages`).
+
+    Returns:
+        A `DriftReport` carrying only `selected`'s pages. When `selected` is empty, drift
+        could not be scoped at all: this returns `verdict="unknown"` with a summary saying so,
+        never the whole-wiki verdict (which would treat an unrelated broken page as if it
+        applied to this question) and never `"intact"` (which would claim a clean bill of
+        health for pages nobody checked).
+    """
+    if not selected:
+        return whole_wiki_drift.model_copy(
+            update={
+                "pages": [],
+                "verdict": "unknown",
+                "summary": (
+                    f"Could not identify which of {repo}'s cached wiki pages ground this question, "
+                    "so their citations could not be checked for drift."
+                ),
+            }
+        )
+    selected_numbers = {entry.number for entry in selected}
+    selected_pages = [page for page in whole_wiki_drift.pages if page.page_number in selected_numbers]
+    return lore_drift.report(
+        repo,
+        whole_wiki_drift.indexed_sha,
+        whole_wiki_drift.head_sha,
+        selected_pages,
+        whole_wiki_drift.changed_file_count,
+        whole_wiki_drift.comparison_complete,
+    )
+
+
+def _read_selected_pages(repo: str, selected: list[PageEntry]) -> list[tuple[int, str, str]]:
+    """`selected`'s own text, bounded by the tool's default read limit, in selection order.
+
+    The primary material `explain` grounds its answer in: each selected page's cached text,
+    read with the same bounded-read discipline `lore read` itself uses, rather than the whole
+    page unconditionally -- a wiki page can run large enough to blow a model's context on its
+    own.
+    """
+    return [(entry.number, entry.title, store.read_page(repo, entry.number).text) for entry in selected]
+
+
+def _fetch_at_head(
+    ref: RepoRef, head_sha: str, cited_paths: list[str], read_limit: int, timeout_seconds: float
+) -> tuple[list[tuple[str, str]], list[str], list[str]]:
+    """Fetch `cited_paths` at `head_sha`, bounded by `read_limit` total characters.
+
+    Args:
+        ref: The repository to read from.
+        head_sha: The commit to read every path at.
+        cited_paths: The paths to fetch, in the order they should be tried.
+        read_limit: Maximum total characters to fetch across every file combined.
+        timeout_seconds: Per-file timeout for the GitHub contents call.
+
+    Returns:
+        `(included, excluded, missing)`. `included` is `(path, text)` pairs actually read, in
+        cited order, truncated if the last one would otherwise exceed `read_limit`. `excluded`
+        names paths never fetched because the budget was already spent. `missing` names paths
+        that do not exist at `head_sha`, which is information about the citation rather than
+        a failure, and does not consume any of the budget.
+    """
+    included: list[tuple[str, str]] = []
+    excluded: list[str] = []
+    missing: list[str] = []
+    total_characters = 0
+    for path in cited_paths:
+        if total_characters >= read_limit:
+            excluded.append(path)
+            continue
+        try:
+            text = github.file_at_ref(ref, path, head_sha, timeout_seconds=timeout_seconds)
+        except LoreError:
+            missing.append(path)
+            continue
+        remaining = read_limit - total_characters
+        if len(text) > remaining:
+            text = text[:remaining]
+        total_characters += len(text)
+        included.append((path, text))
+    return included, excluded, missing
+
+
+def _at_head_freshness(measured: Freshness) -> Freshness:
+    """The `Freshness` to report when grounding bypassed the wiki and read source at head.
+
+    `measured` describes DeepWiki's OWN staleness, which this run does not inherit: the
+    material grounding this particular answer is the repository's current head, so the honest
+    verdict for it is `current`, regardless of how far behind the index itself measured.
+    """
+    return measured.model_copy(
+        update={
+            "verdict": "current",
+            "commits_behind": 0,
+            "summary": (
+                f"This answer is grounded directly in {measured.repo}'s source at head commit "
+                f"{measured.head_sha}, bypassing DeepWiki's index (indexed at "
+                f"{measured.indexed_sha or 'an unknown commit'}, "
+                f"{measured.commits_behind if measured.commits_behind is not None else 'an unmeasured number of'} "
+                "commit(s) behind)."
+            ),
+        }
+    )
+
+
+def _drift_note(report: DriftReport) -> str:
+    """Instruction to the model naming exactly which cited files changed since the wiki was indexed.
+
+    Structural and architectural claims are unaffected; anything resting on the files named
+    here (a signature, flag, endpoint, import, or name) must be marked as needing verification
+    at the repository's current head rather than stated as settled fact.
+    """
+    changed_files: list[str] = []
+    seen: set[str] = set()
+    for page in report.pages:
+        if page.verdict not in ("drifted", "unknown"):
+            continue
+        for change in page.changed:
+            if change.filename not in seen:
+                seen.add(change.filename)
+                changed_files.append(change.filename)
+    if not changed_files:
+        return (
+            "DRIFT WARNING: whether the cited material still matches the repository could not be fully "
+            "established (the changed-file comparison was incomplete). Mark any specific signature, "
+            "flag, or API detail as needing verification at the repository's current head rather than "
+            "stating it as settled."
+        )
+    names = ", ".join(changed_files)
+    return (
+        f"DRIFT WARNING: the following cited file(s) changed in the repository since the wiki was "
+        f"indexed: {names}. Any claim resting on one of them (a signature, flag, endpoint, import, or "
+        "name) must be marked in your answer as needing verification at the repository's current head. "
+        "Structural and architectural claims not resting on these files are unaffected."
+    )
+
+
+def _broken_drift_message(ref: RepoRef, repo: str, question: str, report: DriftReport) -> str:
+    """The refusal message for a `DriftReport` whose verdict is `broken`.
+
+    Names every broken page and the exact files that no longer resolve, then the concrete
+    next actions in order: read the files at head, rerun with `--at-head`, or wait for
+    DeepWiki to reindex. A citation to a file that no longer exists is not evidence of
+    anything a model should be allowed to build on, so this is raised instead of answered.
+    """
+    lines = [
+        (
+            f"'{repo}'s cached wiki cites file(s) that no longer resolve at head, so this answer would be "
+            "grounded in citations that do not exist anymore. Refusing rather than answering around it."
+        ),
+        "",
+        f"Indexed commit: {report.indexed_sha or 'unknown'}. Head commit: {report.head_sha or 'unknown'}.",
+        "",
+        "Broken pages:",
+    ]
+    for page in report.pages:
+        if page.verdict != "broken":
+            continue
+        lines.append(f"- Page {page.page_number} '{page.title}':")
+        for change in page.removed:
+            lines.append(f"    {change.filename} ({change.status})")
+            if report.head_sha:
+                lines.append(
+                    f"      https://github.com/{ref.owner}/{ref.repo}/blob/{report.head_sha}/{change.filename}"
+                )
+    lines += [
+        "",
+        "Next actions, in order:",
+        (
+            f"  1. Read the current file(s) at head: `git clone --depth 1 https://github.com/{ref.owner}/{ref.repo}.git` "
+            "then open the path(s) named above, or use the blob URL given for each file directly."
+        ),
+        f'  2. Rerun with --at-head to have lore fetch the cited source at head itself: `lore explain {repo} "{question}" --at-head`.',
+        f"  3. Visit https://deepwiki.com/{repo} to have DeepWiki's index refreshed.",
+    ]
+    return "\n".join(lines)

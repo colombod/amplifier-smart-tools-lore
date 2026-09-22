@@ -46,6 +46,24 @@ was retrieved in that run, and return citations plus the freshness verdict along
 answer. Done when an answer names its sources and its age, and says it does not know rather
 than filling a gap from memory.
 
+**Act on staleness, not just narrate it.** A repository-wide "82 commits behind" is a red
+herring on its own: measured on `upstash/context7`, 130 cached pages split 4 broken (a cited
+file no longer resolves), 112 drifted (a cited file was edited), 14 intact (untouched) --
+and refusing on `drifted` would refuse 86% of pages into uselessness, while an intact page is
+correct regardless of the commit count. The same measurement also shows the worst-page
+verdict is the wrong SCOPE for a gate about one question: refusing every question against
+that wiki because 4 of 130 pages are broken answers nothing at all. `explain` selects the
+pages that plausibly ground the question first (no model call), measures per-page drift for
+only THOSE pages, and acts on the verdict they actually earned: `broken` refuses rather than
+answer around a citation that does not exist anymore, naming only the selected broken
+page(s); `drifted`/`unknown` tells the *model*, in the prompt, which specific files need
+verification, not just the reader after the fact; `intact` carries no staleness caveat at
+all, whatever other pages in the same wiki are broken or drifted. `--at-head` escalates past
+the wiki entirely, reading the selected pages' cited files directly from the repository's
+live head. Context7's own `state` and `lastUpdateDate` get the equivalent treatment in
+`howto`. Done when a stale citation changes the answer's shape, not just its footnote, and a
+question intact pages ground still answers however broken the rest of the wiki is.
+
 **Run the straight paths with nothing configured.** Everything above works with no model
 provider, no API key, and no GitHub token. Done when the deterministic capabilities pass on a
 machine with no credentials at all.

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from lore.capabilities.check import core as check_core
 from lore.capabilities.docs import core as docs_core
+from lore.capabilities.drift import core as drift_core
 from lore.capabilities.explain import core as explain_core
 from lore.capabilities.fetch import core as fetch_core
 from lore.capabilities.freshness import core as freshness_core
@@ -19,6 +20,7 @@ from lore.schemas import (
     Answer,
     CheckResult,
     DocsResult,
+    DriftReport,
     Freshness,
     Manifest,
     ReadResult,
@@ -95,6 +97,11 @@ def search(repo: str, pattern: str, max_hits: int = 50) -> SearchResult:
     return search_core.search(repo, pattern, max_hits=max_hits)
 
 
+def drift(repo: str, page: int | str | None = None, timeout_seconds: float = 60.0) -> DriftReport:
+    """Whether a cached wiki's pages still match the repository, page by page. Deterministic."""
+    return drift_core.drift(repo, page=page, timeout_seconds=timeout_seconds)
+
+
 def explain(
     repo: str,
     question: str,
@@ -102,6 +109,8 @@ def explain(
     reasoning_effort: ReasoningEffort = "low",
     timeout_seconds: float = 300.0,
     material: str | None = None,
+    at_head: bool = False,
+    at_head_read_limit: int = DEFAULT_READ_LIMIT,
 ) -> Answer:
     """How a project works, its architecture, and how its pieces are wired. Model-backed."""
     return explain_core.explain(
@@ -111,6 +120,8 @@ def explain(
         reasoning_effort=reasoning_effort,
         timeout_seconds=timeout_seconds,
         material=material,
+        at_head=at_head,
+        at_head_read_limit=at_head_read_limit,
     )
 
 
@@ -121,6 +132,7 @@ def howto(
     reasoning_effort: ReasoningEffort = "low",
     timeout_seconds: float = 300.0,
     material: str | None = None,
+    context7_docs_aging_days: int = howto_core.DEFAULT_CONTEXT7_DOCS_AGING_DAYS,
 ) -> Answer:
     """How to use a library for a task, grounded in Context7's retrieved snippets. Model-backed."""
     return howto_core.howto(
@@ -130,4 +142,5 @@ def howto(
         reasoning_effort=reasoning_effort,
         timeout_seconds=timeout_seconds,
         material=material,
+        context7_docs_aging_days=context7_docs_aging_days,
     )

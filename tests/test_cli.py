@@ -60,7 +60,14 @@ def test_explain_material_file_reads_the_file_and_passes_its_contents_to_the_lib
     captured: dict[str, object] = {}
 
     def _fake_explain(
-        repo: str, question: str, model: str, reasoning_effort: str, timeout_seconds: float, material: str | None
+        repo: str,
+        question: str,
+        model: str,
+        reasoning_effort: str,
+        timeout_seconds: float,
+        material: str | None,
+        at_head: bool,
+        at_head_read_limit: int,
     ) -> Answer:
         captured["material"] = material
         return _answer()
@@ -136,7 +143,7 @@ def test_explain_caveat_goes_to_stderr_not_stdout_in_human_mode(monkeypatch: pyt
     monkeypatch.setattr(
         lib,
         "explain",
-        lambda repo, question, model, reasoning_effort, timeout_seconds, material: answer,
+        lambda repo, question, model, reasoning_effort, timeout_seconds, material, at_head, at_head_read_limit: answer,
     )
 
     result = runner.invoke(cli.app, ["explain", "owner/repo", "How does it work?"])
@@ -163,7 +170,7 @@ def test_explain_json_output_still_carries_the_caveat_field(monkeypatch: pytest.
     monkeypatch.setattr(
         lib,
         "explain",
-        lambda repo, question, model, reasoning_effort, timeout_seconds, material: answer,
+        lambda repo, question, model, reasoning_effort, timeout_seconds, material, at_head, at_head_read_limit: answer,
     )
 
     result = runner.invoke(cli.app, ["explain", "owner/repo", "How does it work?", "--json"])

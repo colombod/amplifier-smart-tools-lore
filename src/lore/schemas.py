@@ -161,6 +161,59 @@ class SearchResult(BaseModel):
     truncated: bool
 
 
+FileStatus = Literal["added", "modified", "removed", "renamed", "unknown"]
+DriftVerdict = Literal["intact", "drifted", "broken", "unknown"]
+
+
+class FileChange(BaseModel):
+    """One file GitHub reports changed between two commits."""
+
+    filename: str
+    status: FileStatus
+    changes: int = 0
+    previous_filename: str | None = Field(default=None, description="Prior path, carried only when status is 'renamed'")
+
+
+class PageDrift(BaseModel):
+    """Whether one cached wiki page's own citations still match the repository.
+
+    Measured against the page's own "Relevant source files" block and inline citations, not
+    against the repository as a whole: a repo that is only lightly behind can still carry one
+    page whose entire cited files were deleted, and that page must be reported as broken
+    regardless of how current the rest of the repository looks.
+    """
+
+    page_number: int
+    title: str
+    cited_files: list[str]
+    changed: list[FileChange]
+    removed: list[FileChange] = Field(
+        description="The subset of `changed` whose citation no longer resolves: status 'removed' or 'renamed'"
+    )
+    intact: list[str]
+    verdict: DriftVerdict
+    summary: str = Field(description="One line safe to show a person verbatim, carrying the real counts")
+
+
+class DriftReport(BaseModel):
+    """Whether a cached wiki's pages still match the repository, page by page.
+
+    `verdict` is the WORST `PageDrift.verdict` present, never an average: one broken page
+    makes the report broken, regardless of how many other pages are intact.
+    """
+
+    repo: str
+    indexed_sha: str | None
+    head_sha: str | None
+    pages: list[PageDrift]
+    verdict: DriftVerdict
+    changed_file_count: int
+    comparison_complete: bool = Field(
+        description="False when GitHub's changed-file list could not be enumerated in full"
+    )
+    summary: str = Field(description="One line safe to show a person verbatim")
+
+
 class LibraryRef(BaseModel):
     """One Context7 library, carrying the freshness fields Context7 itself publishes."""
 
@@ -193,10 +246,18 @@ class Citation(BaseModel):
 
     `caller` marks a claim grounded in material the caller supplied directly (`explain`'s or
     `howto`'s `material` argument) instead of anything retrieved from DeepWiki or Context7.
+    `at_head` marks a claim grounded in source `explain --at-head` read directly from the
+    repository at its live head commit, rather than DeepWiki's (possibly stale) index; `ref`
+    carries that commit and is set mechanically by the library, never trusted from the model.
     """
 
-    source: Literal["deepwiki", "context7", "caller"]
-    reference: str = Field(description="Page title, library id, url, or 'caller-supplied material' the claim rests on")
+    source: Literal["deepwiki", "context7", "caller", "at_head"]
+    reference: str = Field(
+        description="Page title, library id, file path, url, or 'caller-supplied material' the claim rests on"
+    )
+    ref: str | None = Field(
+        default=None, description="Commit the material was read at; carried only when source is 'at_head'"
+    )
 
 
 class Answer(BaseModel):

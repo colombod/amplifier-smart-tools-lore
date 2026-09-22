@@ -1,20 +1,30 @@
 """GitHub's REST API: the live side of a freshness measurement, working with no credentials."""
 
+import base64
+import binascii
 import json
 import os
 import re
 import shutil
 import subprocess
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
-from lore.schemas import LoreError, RepoRef
+from lore.schemas import FileChange, FileStatus, LoreError, RepoRef
 
 API_BASE = "https://api.github.com"
 TOKEN_ENV = "GITHUB_TOKEN"
 
 _GH_STATUS = re.compile(r"\(HTTP (\d+)\)")
+
+# GitHub hard-caps the compare endpoint's `files` array at 300 entries per page and moves
+# through more with `?page=N`; there is no `per_page` to raise that cap. A page shorter than
+# this is the last one, by construction: continuing past it would ask for a page that does
+# not exist rather than reveal more files.
+COMPARE_FILES_PAGE_SIZE = 300
+_KNOWN_FILE_STATUSES = frozenset({"added", "modified", "removed", "renamed"})
 
 
 def default_branch(repo: RepoRef, timeout_seconds: float = 30.0) -> str:
@@ -60,6 +70,64 @@ def repository_exists(repo: RepoRef, timeout_seconds: float = 30.0) -> bool:
     if status == httpx.codes.NOT_FOUND:
         return False
     raise LoreError(f"Could not tell whether {repo.slug} exists: {_error_detail(status, body)}")
+
+
+def changed_files(
+    repo: RepoRef, base_sha: str, head: str, timeout_seconds: float = 60.0
+) -> tuple[list[FileChange], bool]:
+    """Every file changed between `base_sha` and `head`, paginated to exhaustion.
+
+    Returns `(changes, complete)`. `complete` is False when a request failed or returned a
+    shape this could not read, which stops the walk wherever it had gotten to. A caller must
+    never treat an incomplete result as proof a given file did not change: absence from a
+    truncated list is not evidence of anything, only silence.
+    """
+    changes: list[FileChange] = []
+    page = 1
+    while True:
+        status, body = _get(f"repos/{repo.owner}/{repo.repo}/compare/{base_sha}...{head}?page={page}", timeout_seconds)
+        if status != httpx.codes.OK or not isinstance(body, dict):
+            return changes, False
+        files = body.get("files")
+        if not isinstance(files, list):
+            return changes, False
+        changes.extend(_file_change(entry) for entry in files if isinstance(entry, dict))
+        if len(files) < COMPARE_FILES_PAGE_SIZE:
+            return changes, True
+        page += 1
+
+
+def file_at_ref(repo: RepoRef, path: str, ref: str, timeout_seconds: float = 30.0) -> str:
+    """The text of `path` in `repo` at `ref`, decoded from GitHub's contents API.
+
+    Raises:
+        LoreError: `path` does not exist at `ref`, or the response could not be read or decoded.
+    """
+    encoded_path = "/".join(quote(segment, safe="") for segment in path.split("/"))
+    status, body = _get(f"repos/{repo.owner}/{repo.repo}/contents/{encoded_path}?ref={ref}", timeout_seconds)
+    if status == httpx.codes.NOT_FOUND:
+        raise LoreError(f"'{path}' does not exist in {repo.slug} at {ref}. It may have been removed or renamed.")
+    if status != httpx.codes.OK or not isinstance(body, dict):
+        raise LoreError(f"Could not read {repo.slug}'s '{path}' at {ref}: {_error_detail(status, body)}")
+    content = body.get("content")
+    if not isinstance(content, str) or body.get("encoding") != "base64":
+        raise LoreError(f"GitHub's response for {repo.slug}'s '{path}' at {ref} did not carry base64 content.")
+    try:
+        return base64.b64decode(content).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError) as error:
+        raise LoreError(f"Could not decode {repo.slug}'s '{path}' at {ref}: {error}") from error
+
+
+def _file_change(entry: dict[str, Any]) -> FileChange:
+    status = entry.get("status")
+    changes = entry.get("changes")
+    normalized_status: FileStatus = status if status in _KNOWN_FILE_STATUSES else "unknown"
+    return FileChange(
+        filename=str(entry.get("filename", "")),
+        status=normalized_status,
+        changes=changes if isinstance(changes, int) else 0,
+        previous_filename=entry.get("previous_filename"),
+    )
 
 
 def _head_commit_from_json(body: dict[str, Any]) -> tuple[str | None, str | None]:

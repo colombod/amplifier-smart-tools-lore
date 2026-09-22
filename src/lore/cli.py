@@ -236,6 +236,36 @@ def search(
 
 
 @app.command()
+def drift(
+    repo: Annotated[str, typer.Argument(help="Repository slug fetch cached, e.g. 'owner/name'.")],
+    page: Annotated[
+        str | None, typer.Option("--page", help="Restrict to one page, by number or a title substring.")
+    ] = None,
+    timeout_seconds: Annotated[
+        float, typer.Option(help="Per-request timeout for the compare call, in seconds.")
+    ] = 60.0,
+    json_output: Annotated[bool, typer.Option("--json", help="Print the result as JSON.")] = False,
+) -> None:
+    """Whether a cached wiki's pages still match the repository, page by page. Deterministic."""
+    result = lib.drift(repo, page=_page_argument(page) if page is not None else None, timeout_seconds=timeout_seconds)
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+    typer.echo(f"{result.verdict}: {result.summary}")
+    for page_entry in result.pages:
+        if page_entry.verdict not in ("broken", "drifted"):
+            continue
+        typer.echo(f"[{page_entry.verdict}] page {page_entry.page_number} '{page_entry.title}'")
+        if page_entry.removed:
+            removed_names = ", ".join(f"{change.filename} ({change.status})" for change in page_entry.removed)
+            typer.echo(f"    removed: {removed_names}")
+        typer.echo(f"    {page_entry.summary}")
+    intact_count = sum(1 for page_entry in result.pages if page_entry.verdict == "intact")
+    unknown_count = sum(1 for page_entry in result.pages if page_entry.verdict == "unknown")
+    typer.echo(f"{intact_count} page(s) intact, {unknown_count} page(s) unknown (not shown in detail).")
+
+
+@app.command()
 def explain(
     repo: Annotated[str, typer.Argument(help="Repository as 'owner/name' or a github.com URL.")],
     question: Annotated[str, typer.Argument(help="Question about the repository's architecture or design.")],
@@ -250,6 +280,16 @@ def explain(
             "--material-file", help="Read this file and use its contents in place of DeepWiki's own retrieval."
         ),
     ] = None,
+    at_head: Annotated[
+        bool,
+        typer.Option(
+            "--at-head",
+            help="Ground on cited source read directly at the repository's head commit instead of the wiki.",
+        ),
+    ] = False,
+    at_head_read_limit: Annotated[
+        int, typer.Option(help="Maximum total characters of head-commit source to fetch with --at-head.")
+    ] = DEFAULT_READ_LIMIT,
     json_output: Annotated[bool, typer.Option("--json", help="Print the result as JSON.")] = False,
 ) -> None:
     """How a project works, its architecture, and how its pieces are wired. Model-backed."""
@@ -260,6 +300,8 @@ def explain(
         reasoning_effort=reasoning_effort,
         timeout_seconds=timeout_seconds,
         material=_read_material_file(material_file),
+        at_head=at_head,
+        at_head_read_limit=at_head_read_limit,
     )
     if json_output:
         typer.echo(result.model_dump_json(indent=2))

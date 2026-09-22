@@ -56,6 +56,12 @@ CAPABILITIES = (
         skill="capabilities/search/SKILL.md",
     ),
     Capability(
+        "drift",
+        "Measure whether a cached wiki's pages still match the repository, page by page.",
+        model_backed=False,
+        skill="capabilities/drift/SKILL.md",
+    ),
+    Capability(
         "explain",
         "Explain how a project works, its architecture, and how its pieces are wired, grounded in DeepWiki.",
         model_backed=True,

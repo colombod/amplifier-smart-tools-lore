@@ -13,7 +13,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from lore.intelligence.schemas import AgentResult
-from lore.schemas import Answer, Citation, Freshness, LoreError
+from lore.schemas import Answer, Citation, DriftReport, Freshness, LoreError
 
 GROUNDING_RULE = (
     "GROUNDING RULE: you may use ONLY the material retrieved above, and nothing you remember "
@@ -37,7 +37,7 @@ ANSWER_OUTPUT_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "source": {"type": "string", "enum": ["deepwiki", "context7", "caller"]},
+                    "source": {"type": "string", "enum": ["deepwiki", "context7", "caller", "at_head"]},
                     "reference": {
                         "type": "string",
                         "description": (
@@ -89,6 +89,39 @@ def caveat_for(freshness: Freshness) -> str | None:
     return f"The index for {freshness.repo} is {gap} behind the repository. {STALE_CAVEAT}"
 
 
+def caveat_for_drift(freshness: Freshness, drift_report: DriftReport | None) -> str | None:
+    """The staleness caveat to show, given a per-page drift measurement of the pages that ground the answer.
+
+    `broken` never reaches here: a capability that measures drift refuses before synthesis
+    runs rather than answering around a citation that no longer resolves. `intact` overrides
+    `freshness` entirely, whatever the commit count: a repository can be many commits behind
+    while every file the answer's pages cite is untouched, and reporting a caveat in that case
+    would train a caller to ignore it. `unknown` is treated with the same caution as
+    `drifted`, and the caveat says explicitly that per-page drift could not be established,
+    since folding it silently into the repository-wide gap would understate the risk of a
+    citation that quietly does not resolve. `None` (drift not measured at all, e.g.
+    `explain --at-head` or caller-supplied material) falls back to `caveat_for` alone,
+    unchanged.
+
+    Args:
+        freshness: The measurement an `explain` call grounded its retrieval in.
+        drift_report: The per-page drift measurement for the pages that grounded this answer,
+            or `None` when drift was not measured for this call.
+
+    Returns:
+        The caveat text to show, or `None` when there is nothing to warn about.
+    """
+    base = caveat_for(freshness)
+    if drift_report is None:
+        return base
+    if drift_report.verdict == "intact":
+        return None
+    if drift_report.verdict == "unknown":
+        note = f"Per-page drift for {drift_report.repo} could not be established: {drift_report.summary}"
+        return note if base is None else f"{base} {note}"
+    return base
+
+
 def _gap_clause(commits_behind: int | None, days_behind: int | None) -> str:
     """`commits_behind`/`days_behind` as a phrase, e.g. '5 commits and 3 days'."""
     if commits_behind is None:
@@ -101,7 +134,14 @@ def _gap_clause(commits_behind: int | None, days_behind: int | None) -> str:
     return clause
 
 
-def answer_from_result(question: str, target: str, result: AgentResult, freshness: Freshness) -> Answer:
+def answer_from_result(
+    question: str,
+    target: str,
+    result: AgentResult,
+    freshness: Freshness,
+    drift_report: DriftReport | None = None,
+    head_ref: str | None = None,
+) -> Answer:
     """Build the `Answer` a model-backed capability returns, from one completed agent run.
 
     Args:
@@ -109,6 +149,11 @@ def answer_from_result(question: str, target: str, result: AgentResult, freshnes
         target: The repository or library the answer is about.
         result: The completed run to read the structured submission from.
         freshness: The measurement to attach to the answer and to derive its caveat from.
+        drift_report: The per-page drift measurement for the pages that grounded this answer,
+            when one was made; passed to `caveat_for_drift` in place of `caveat_for` alone.
+        head_ref: The commit citations sourced `at_head` were read at. When given, every such
+            citation's `ref` is set to this value mechanically, regardless of what the model
+            submitted: the model is told the ref in the prompt, but this is what enforces it.
 
     Returns:
         An `Answer` carrying the submitted text, citations, and unanswered parts, alongside
@@ -137,6 +182,11 @@ def answer_from_result(question: str, target: str, result: AgentResult, freshnes
         citations = [Citation.model_validate(entry) for entry in result.output.get("citations") or []]
     except ValidationError as error:
         raise LoreError(f"The model's citations for '{target}' did not match the citation contract: {error}") from error
+    if head_ref is not None:
+        citations = [
+            citation.model_copy(update={"ref": head_ref}) if citation.source == "at_head" else citation
+            for citation in citations
+        ]
     unanswered = [str(item) for item in result.output.get("unanswered") or []]
     return Answer(
         question=question,
@@ -145,5 +195,5 @@ def answer_from_result(question: str, target: str, result: AgentResult, freshnes
         citations=citations,
         unanswered=unanswered,
         freshness=freshness,
-        caveat=caveat_for(freshness),
+        caveat=caveat_for_drift(freshness, drift_report),
     )

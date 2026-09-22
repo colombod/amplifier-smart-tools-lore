@@ -2,7 +2,7 @@ import pytest
 
 from lore import grounding
 from lore.intelligence.schemas import AgentResult
-from lore.schemas import Citation, Freshness, LoreError
+from lore.schemas import Citation, DriftReport, Freshness, LoreError
 
 
 def _freshness(verdict: str, **overrides: object) -> Freshness:
@@ -15,6 +15,21 @@ def _freshness(verdict: str, **overrides: object) -> Freshness:
     }
     fields.update(overrides)
     return Freshness.model_validate(fields)
+
+
+def _drift_report(verdict: str, **overrides: object) -> DriftReport:
+    fields: dict[str, object] = {
+        "repo": "owner/repo",
+        "indexed_sha": "abc123",
+        "head_sha": "def456",
+        "pages": [],
+        "verdict": verdict,
+        "changed_file_count": 0,
+        "comparison_complete": True,
+        "summary": f"{verdict} summary",
+    }
+    fields.update(overrides)
+    return DriftReport.model_validate(fields)
 
 
 def test_caveat_is_none_for_current() -> None:
@@ -188,3 +203,81 @@ def test_answer_from_result_raises_on_a_malformed_citation() -> None:
 
     with pytest.raises(LoreError, match="citation contract"):
         grounding.answer_from_result("q", "owner/repo", result, freshness)
+
+
+def test_caveat_for_drift_is_none_for_an_intact_page_however_stale_the_index() -> None:
+    """The false-positive direction: many commits behind, but every cited file untouched."""
+    freshness = _freshness("stale", commits_behind=84, days_behind=63)
+    drift = _drift_report("intact")
+
+    assert grounding.caveat_for_drift(freshness, drift) is None
+
+
+def test_caveat_for_drift_names_the_unestablished_comparison_for_unknown_drift() -> None:
+    """`unknown` must never read as `intact`, and the caveat must say why it could not be measured."""
+    freshness = _freshness("stale", commits_behind=10, days_behind=5)
+    drift = _drift_report("unknown", summary="owner/repo: unknown, the changed-file comparison was incomplete.")
+
+    caveat = grounding.caveat_for_drift(freshness, drift)
+
+    assert caveat is not None
+    assert "could not be established" in caveat
+    assert "changed-file comparison was incomplete" in caveat
+
+
+def test_caveat_for_drift_falls_back_to_the_plain_freshness_caveat_for_drifted() -> None:
+    freshness = _freshness("aging", commits_behind=5, days_behind=3)
+    drift = _drift_report("drifted")
+
+    caveat = grounding.caveat_for_drift(freshness, drift)
+
+    assert caveat == grounding.caveat_for(freshness)
+
+
+def test_caveat_for_drift_falls_back_to_caveat_for_when_drift_was_not_measured() -> None:
+    freshness = _freshness("stale", commits_behind=82, days_behind=63)
+
+    assert grounding.caveat_for_drift(freshness, None) == grounding.caveat_for(freshness)
+
+
+def test_answer_from_result_uses_caveat_for_drift_when_a_drift_report_is_given() -> None:
+    freshness = _freshness("stale", commits_behind=84, days_behind=63)
+    drift = _drift_report("intact")
+    result = AgentResult(output={"answer": "ok", "citations": [], "unanswered": []})
+
+    answer = grounding.answer_from_result("q", "owner/repo", result, freshness, drift_report=drift)
+
+    assert answer.caveat is None
+
+
+def test_answer_from_result_sets_the_head_ref_on_at_head_citations_regardless_of_the_model() -> None:
+    """The library enforces `ref` mechanically; it is never trusted from what the model submitted."""
+    freshness = _freshness("current")
+    result = AgentResult(
+        output={
+            "answer": "ok",
+            "citations": [
+                {"source": "at_head", "reference": "src/module.py", "ref": "wrong-sha-from-model"},
+                {"source": "deepwiki", "reference": "Architecture"},
+            ],
+            "unanswered": [],
+        }
+    )
+
+    answer = grounding.answer_from_result("q", "owner/repo", result, freshness, head_ref="def456")
+
+    assert answer.citations[0].source == "at_head"
+    assert answer.citations[0].ref == "def456"
+    assert answer.citations[1].source == "deepwiki"
+    assert answer.citations[1].ref is None
+
+
+def test_answer_from_result_leaves_citations_untouched_when_head_ref_is_not_given() -> None:
+    freshness = _freshness("current")
+    result = AgentResult(
+        output={"answer": "ok", "citations": [{"source": "at_head", "reference": "src/module.py"}], "unanswered": []}
+    )
+
+    answer = grounding.answer_from_result("q", "owner/repo", result, freshness)
+
+    assert answer.citations[0].ref is None

@@ -34,12 +34,15 @@ class _PreflightFailsIntelligence:
 
 
 def test_build_prompt_carries_the_grounding_rule_and_all_retrieved_material() -> None:
-    prompt = build_prompt("owner/repo", "How does X work?", "structure text", "deepwiki answer text")
+    prompt = build_prompt(
+        "owner/repo", "How does X work?", [(1, "Some Page", "page body text")], "deepwiki answer text"
+    )
 
     assert GROUNDING_RULE in prompt
     assert "owner/repo" in prompt
     assert "How does X work?" in prompt
-    assert "structure text" in prompt
+    assert "Some Page" in prompt
+    assert "page body text" in prompt
     assert "deepwiki answer text" in prompt
 
 
