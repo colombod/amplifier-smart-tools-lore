@@ -83,14 +83,14 @@ def test_parse_sse_message_raises_when_no_data_line_carries_a_result_or_error() 
 def test_content_text_returns_the_first_content_blocks_text() -> None:
     message = {"result": {"content": [{"type": "text", "text": "the answer"}]}}
 
-    assert deepwiki._content_text(message, "ask_wiki_question") == "the answer"
+    assert deepwiki._content_text(message, "ask_wiki_question", {"repoName": "owner/repo"}) == "the answer"
 
 
 def test_content_text_raises_unknown_tool_on_a_jsonrpc_error_naming_it() -> None:
     message = {"error": {"code": -32601, "message": "Unknown tool: ask_wiki_question"}}
 
     with pytest.raises(deepwiki._ToolCallError) as failure:
-        deepwiki._content_text(message, "ask_wiki_question")
+        deepwiki._content_text(message, "ask_wiki_question", {"repoName": "owner/repo"})
 
     assert failure.value.unknown_tool is True
 
@@ -99,6 +99,20 @@ def test_content_text_raises_non_unknown_tool_error_when_the_tool_reports_ismerr
     message = {"result": {"isError": True, "content": [{"type": "text", "text": "bad repoName"}]}}
 
     with pytest.raises(deepwiki._ToolCallError) as failure:
-        deepwiki._content_text(message, "read_wiki_structure")
+        deepwiki._content_text(message, "read_wiki_structure", {"repoName": "owner/repo"})
 
     assert failure.value.unknown_tool is False
+
+
+def test_content_text_failure_names_the_repository_and_an_indexing_remedy() -> None:
+    message = {"result": {"isError": True, "content": [{"type": "text", "text": "bad repoName"}]}}
+
+    with pytest.raises(deepwiki._ToolCallError, match=r"owner/repo.*deepwiki\.com/owner/repo"):
+        deepwiki._content_text(message, "read_wiki_structure", {"repoName": "owner/repo"})
+
+
+def test_content_text_failure_falls_back_to_a_generic_remedy_when_no_repo_name_is_known() -> None:
+    message = {"result": {"isError": True, "content": [{"type": "text", "text": "bad input"}]}}
+
+    with pytest.raises(deepwiki._ToolCallError, match=r"Retry once"):
+        deepwiki._content_text(message, "read_wiki_structure", {})

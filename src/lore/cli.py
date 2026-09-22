@@ -1,6 +1,7 @@
 """Command line entry point for Lore."""
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Annotated, Any
 
 import typer
@@ -88,7 +89,7 @@ def cli(
         ),
     ] = False,
 ) -> None:
-    """Answers how to use a library, how a project works, and what its architecture is, from DeepWiki and Context7 - with every answer carrying measured index freshness so stale knowledge is named rather than guessed"""
+    """Answers how to use a library, how a project works, and what its architecture is, from DeepWiki and Context7 - with every answer carrying measured index freshness so stale knowledge is named rather than guessed - reach for it before writing code against a library or repository you do not already know cold, or whenever an answer's age matters"""
 
 
 @app.command()
@@ -140,6 +141,7 @@ def fetch(
         return
     origin = "cache" if result.from_cache else "DeepWiki"
     typer.echo(f"{result.repo}: {len(result.pages)} pages, {result.total_characters} characters, from {origin}.")
+    typer.echo(f"Cache: {result.root}")
     for entry in result.pages:
         typer.echo(f"{entry.number:>3}  {entry.title}")
 
@@ -226,11 +228,22 @@ def explain(
     timeout_seconds: Annotated[
         float, typer.Option(help="Per-request timeout for each retrieval call and the synthesis, in seconds.")
     ] = 300.0,
+    material_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--material-file", help="Read this file and use its contents in place of DeepWiki's own retrieval."
+        ),
+    ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Print the result as JSON.")] = False,
 ) -> None:
     """How a project works, its architecture, and how its pieces are wired. Model-backed."""
     result = lib.explain(
-        repo, question, model=model, reasoning_effort=reasoning_effort, timeout_seconds=timeout_seconds
+        repo,
+        question,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        timeout_seconds=timeout_seconds,
+        material=_read_material_file(material_file),
     )
     if json_output:
         typer.echo(result.model_dump_json(indent=2))
@@ -247,14 +260,41 @@ def howto(
     timeout_seconds: Annotated[
         float, typer.Option(help="Per-request timeout for each retrieval call and the synthesis, in seconds.")
     ] = 300.0,
+    material_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--material-file",
+            help="Read this file and use its contents in place of Context7's (and DeepWiki's) own retrieval.",
+        ),
+    ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Print the result as JSON.")] = False,
 ) -> None:
     """How to use a library for a task, grounded in Context7's retrieved snippets. Model-backed."""
-    result = lib.howto(library, task, model=model, reasoning_effort=reasoning_effort, timeout_seconds=timeout_seconds)
+    result = lib.howto(
+        library,
+        task,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        timeout_seconds=timeout_seconds,
+        material=_read_material_file(material_file),
+    )
     if json_output:
         typer.echo(result.model_dump_json(indent=2))
         return
     _echo_answer(result)
+
+
+def _read_material_file(path: Path | None) -> str | None:
+    """`path`'s contents, or `None` when no `--material-file` was given.
+
+    This is the CLI's own convenience: the library takes the material itself, never a path.
+    """
+    if path is None:
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise LoreError(f"Could not read --material-file {path}: {error}") from error
 
 
 def _echo_answer(result: Answer) -> None:

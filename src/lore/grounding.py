@@ -37,10 +37,13 @@ ANSWER_OUTPUT_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "source": {"type": "string", "enum": ["deepwiki", "context7"]},
+                    "source": {"type": "string", "enum": ["deepwiki", "context7", "caller"]},
                     "reference": {
                         "type": "string",
-                        "description": "Page title, library id, or url the claim rests on.",
+                        "description": (
+                            "Page title, library id, or url the claim rests on; "
+                            "'caller-supplied material' when source is 'caller'."
+                        ),
                     },
                 },
                 "required": ["source", "reference"],
@@ -115,7 +118,10 @@ def answer_from_result(question: str, target: str, result: AgentResult, freshnes
         LoreError: the run failed, or its structured output is missing, malformed, or carries an empty answer.
     """
     if result.error is not None:
-        raise LoreError(f"Could not synthesize an answer for '{target}': {result.error}")
+        raise LoreError(
+            f"Could not synthesize an answer for '{target}': {result.error}. Check `gh auth status`, "
+            "confirm the signed-in account has an active GitHub Copilot subscription, or retry."
+        )
     if not result.output:
         raise LoreError(f"The model returned no structured output for '{target}'.")
     answer_text = result.output.get("answer")

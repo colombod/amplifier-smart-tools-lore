@@ -99,7 +99,13 @@ def _get_via_gh(path: str, timeout_seconds: float) -> tuple[int, Any]:
     except (OSError, subprocess.TimeoutExpired) as error:
         return 0, str(error)
     if result.returncode == 0:
-        return httpx.codes.OK, json.loads(result.stdout)
+        try:
+            return httpx.codes.OK, json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            raise LoreError(
+                f"'gh api {path}' returned output that could not be parsed as JSON: {error}. "
+                f"Retry the command; if it keeps happening, run `gh api {path}` directly to see the raw response."
+            ) from error
     return status_from_gh_stderr(result.stderr), result.stderr.strip()
 
 

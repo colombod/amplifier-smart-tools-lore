@@ -1,7 +1,7 @@
 [project]
 name = "lore"
 version = "0.1.0"
-description = "Answers how to use a library, how a project works, and what its architecture is, from DeepWiki and Context7 - with every answer carrying measured index freshness so stale knowledge is named rather than guessed"
+description = "Answers how to use a library, how a project works, and what its architecture is, from DeepWiki and Context7 - with every answer carrying measured index freshness so stale knowledge is named rather than guessed - reach for it before writing code against a library or repository you do not already know cold, or whenever an answer's age matters"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

@@ -4,6 +4,7 @@ import subprocess
 import pytest
 
 from lore.capabilities.check import core
+from lore.core.manifest import requirement_install_url
 from lore.sources import context7
 
 
@@ -66,3 +67,14 @@ def test_gh_authenticated_is_false_when_the_subprocess_times_out(monkeypatch: py
     monkeypatch.setattr(core.subprocess, "run", _raise)
 
     assert core._gh_authenticated() is False
+
+
+def test_copilot_prerequisite_names_the_same_install_url_the_manifest_declares(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(core.shutil, "which", lambda _name: None)
+
+    result = core._copilot_prerequisite()
+
+    assert result.ok is False
+    assert requirement_install_url("gh") in result.detail

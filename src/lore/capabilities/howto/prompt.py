@@ -33,3 +33,37 @@ def build_prompt(library: str, task: str, resolved: LibraryRef, context7_docs: s
         sections.append(f"## Retrieved: DeepWiki's own answer about {resolved.id}'s design\n{deepwiki_answer}")
     sections.append("Using only the retrieved material above, submit your answer.")
     return "\n\n".join(sections)
+
+
+def build_prompt_from_material(library: str, task: str, resolved: LibraryRef, material: str) -> str:
+    """The full prompt for one `howto` call grounded in material the caller supplied directly.
+
+    Used in place of `build_prompt` when the caller already holds the material to ground the
+    answer in, so nothing is retrieved from Context7 or DeepWiki for this call.
+
+    Args:
+        library: The library name as passed to `howto`.
+        task: The task to explain how to accomplish.
+        resolved: The library Context7 resolved `library` to.
+        material: The material the caller supplied in place of Context7's (and DeepWiki's) own retrieval.
+
+    Returns:
+        The prompt text, carrying `GROUNDING_RULE` and nothing outside `material`.
+    """
+    intro = (
+        f"You are explaining how to use the library '{library}' (Context7 resolved this to "
+        f"'{resolved.id}') to accomplish a task."
+    )
+    return "\n\n".join(
+        [
+            intro,
+            GROUNDING_RULE,
+            f"## Task\n{task}",
+            f"## Retrieved: material supplied directly by the caller for {resolved.id}\n{material}",
+            (
+                "This material was supplied directly by the caller rather than retrieved from "
+                'Context7 or DeepWiki. Cite claims grounded in it with source "caller".'
+            ),
+            "Using only the retrieved material above, submit your answer.",
+        ]
+    )

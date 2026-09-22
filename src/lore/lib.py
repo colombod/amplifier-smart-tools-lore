@@ -101,10 +101,16 @@ def explain(
     model: str = DEFAULT_INTELLIGENCE_MODEL,
     reasoning_effort: ReasoningEffort = "low",
     timeout_seconds: float = 300.0,
+    material: str | None = None,
 ) -> Answer:
     """How a project works, its architecture, and how its pieces are wired. Model-backed."""
     return explain_core.explain(
-        repo, question, model=model, reasoning_effort=reasoning_effort, timeout_seconds=timeout_seconds
+        repo,
+        question,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        timeout_seconds=timeout_seconds,
+        material=material,
     )
 
 
@@ -114,8 +120,14 @@ def howto(
     model: str = DEFAULT_INTELLIGENCE_MODEL,
     reasoning_effort: ReasoningEffort = "low",
     timeout_seconds: float = 300.0,
+    material: str | None = None,
 ) -> Answer:
     """How to use a library for a task, grounded in Context7's retrieved snippets. Model-backed."""
     return howto_core.howto(
-        library, task, model=model, reasoning_effort=reasoning_effort, timeout_seconds=timeout_seconds
+        library,
+        task,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        timeout_seconds=timeout_seconds,
+        material=material,
     )

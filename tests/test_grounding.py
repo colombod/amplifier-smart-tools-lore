@@ -126,6 +126,14 @@ def test_answer_from_result_raises_on_an_agent_error() -> None:
         grounding.answer_from_result("q", "owner/repo", result, freshness)
 
 
+def test_answer_from_result_names_a_remedy_for_an_agent_error() -> None:
+    freshness = _freshness("current")
+    result = AgentResult(error="RuntimeError: the SDK could not start a session.")
+
+    with pytest.raises(LoreError, match=r"gh auth status"):
+        grounding.answer_from_result("q", "owner/repo", result, freshness)
+
+
 def test_answer_from_result_raises_when_output_is_empty() -> None:
     freshness = _freshness("current")
     result = AgentResult(output={})

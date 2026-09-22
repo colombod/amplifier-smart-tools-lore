@@ -138,33 +138,66 @@ def _invoke(tool: str, arguments: dict[str, Any], timeout_seconds: float) -> str
         with httpx.Client(timeout=_timeout(timeout_seconds)) as client:
             response = client.post(ENDPOINT, json=payload, headers=HEADERS)
     except httpx.HTTPError as error:
-        raise _ToolCallError(f"DeepWiki request for '{tool}' failed: {error}", unknown_tool=False) from error
+        raise _ToolCallError(
+            f"DeepWiki request for '{tool}' failed: {error}. Retry once; if it keeps failing, check "
+            "https://status.deepwiki.com or https://deepwiki.com directly.",
+            unknown_tool=False,
+        ) from error
     if response.status_code != httpx.codes.OK:
         raise _ToolCallError(
-            f"DeepWiki returned HTTP {response.status_code} calling '{tool}': {response.text[:200]}",
+            f"DeepWiki returned HTTP {response.status_code} calling '{tool}': {response.text[:200]}. "
+            "Retry once; if it persists, check https://status.deepwiki.com or https://deepwiki.com directly.",
             unknown_tool=False,
         )
     try:
         message = parse_sse_message(response.text)
     except ValueError as error:
         raise _ToolCallError(
-            f"DeepWiki's response to '{tool}' could not be parsed: {error}", unknown_tool=False
+            f"DeepWiki's response to '{tool}' could not be parsed: {error}. Retry once; DeepWiki's response "
+            "shape may have changed, so check https://deepwiki.com directly if it keeps happening.",
+            unknown_tool=False,
         ) from error
-    return _content_text(message, tool)
+    return _content_text(message, tool, arguments)
 
 
-def _content_text(message: dict[str, Any], tool: str) -> str:
+def _content_text(message: dict[str, Any], tool: str, arguments: dict[str, Any]) -> str:
     if "error" in message:
         detail = _error_message(message["error"])
-        raise _ToolCallError(f"DeepWiki rejected '{tool}': {detail}", unknown_tool=_is_unknown_tool(detail))
+        raise _ToolCallError(
+            f"DeepWiki rejected '{tool}': {detail}. {_repo_remedy(arguments)}",
+            unknown_tool=_is_unknown_tool(detail),
+        )
     result = message.get("result") or {}
     if result.get("isError"):
         detail = _first_text(result) or "no detail returned"
-        raise _ToolCallError(f"DeepWiki tool '{tool}' failed: {detail}", unknown_tool=_is_unknown_tool(detail))
+        raise _ToolCallError(
+            f"DeepWiki tool '{tool}' failed: {detail}. {_repo_remedy(arguments)}",
+            unknown_tool=_is_unknown_tool(detail),
+        )
     text = _first_text(result)
     if text is None:
-        raise _ToolCallError(f"DeepWiki tool '{tool}' returned no text content.", unknown_tool=False)
+        raise _ToolCallError(
+            f"DeepWiki tool '{tool}' returned no text content. Retry once; if it persists, check "
+            "https://deepwiki.com directly.",
+            unknown_tool=False,
+        )
     return text
+
+
+def _repo_remedy(arguments: dict[str, Any]) -> str:
+    """The concrete next action for a rejected or failed tool call, naming the repository when known.
+
+    A rejection or an `isError` result from these tools is almost always either a misspelled
+    `owner/repo` or a repository DeepWiki has not indexed yet, so the remedy names both rather
+    than repeating the raw service text with nothing a caller can act on.
+    """
+    repo_name = arguments.get("repoName")
+    if not repo_name:
+        return "Retry once; if it persists, check https://deepwiki.com directly."
+    return (
+        f"Check that '{repo_name}' is spelled correctly, or visit https://deepwiki.com/{repo_name} "
+        "to have it indexed if it is a valid but unindexed repository."
+    )
 
 
 def _first_text(result: dict[str, Any]) -> str | None:

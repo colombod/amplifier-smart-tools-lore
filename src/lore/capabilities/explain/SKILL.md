@@ -12,8 +12,12 @@ URL. `QUESTION` is a question about the repository's architecture, design, or wi
 `--model` selects the model to run the synthesis through, defaulting to
 `DEFAULT_INTELLIGENCE_MODEL` in `schemas.py`. `--reasoning-effort` sets that model's
 reasoning effort (default `low`). `--timeout-seconds` bounds each retrieval call and the
-synthesis itself (default `300.0`). Add `--json` to print the full `Answer` model instead
-of the rendered answer.
+synthesis itself (default `300.0`). `--material-file PATH` reads that file and uses its
+contents in place of DeepWiki's own retrieval; the never-indexed guard is skipped, since the
+file already supplies something to ground the answer in, and its claims are cited with
+source `caller` instead of `deepwiki`. The library's own `material` argument takes this
+content directly rather than a path, which is the CLI's convenience alone. Add `--json` to
+print the full `Answer` model instead of the rendered answer.
 
 ```bash
 lore explain upstash/context7 "How is search request ranking implemented?"
@@ -27,11 +31,12 @@ result.answer, result.citations, result.unanswered, result.caveat
 ```
 
 Returns an `Answer`: `answer` (grounded only in retrieved material), `citations` (each
-naming `deepwiki` and the page the claim rests on), `unanswered` (parts of the question the
-retrieved material did not cover), `freshness` (the measurement `freshness` would report for
-`REPO`), and `caveat`. `caveat` is `None` when the index is current, and otherwise names the
-measured commits and days the index trails the repository by, so a stale index is never
-silently trusted.
+naming `deepwiki`, or `caller` when grounded in `--material-file` instead, and the page or
+material the claim rests on), `unanswered` (parts of the question the retrieved material did
+not cover), `freshness` (the measurement `freshness` would report for `REPO`, still measured
+even with `--material-file`), and `caveat`. `caveat` is `None` when the index is current, and
+otherwise names the measured commits and days the index trails the repository by, so a stale
+index is never silently trusted.
 
 ## Failures
 

@@ -81,7 +81,10 @@ def _get(path: str, params: dict[str, str], timeout_seconds: float) -> httpx.Res
         with httpx.Client(timeout=_timeout(timeout_seconds)) as client:
             return client.get(f"{BASE_URL}{path}", params=params, headers=_headers())
     except httpx.HTTPError as error:
-        raise LoreError(f"Context7 request to {path} failed: {error}") from error
+        raise LoreError(
+            f"Context7 request to {path} failed: {error}. Retry once; if it keeps failing, check your "
+            "network connection or https://context7.com directly."
+        ) from error
 
 
 def _headers() -> dict[str, str]:

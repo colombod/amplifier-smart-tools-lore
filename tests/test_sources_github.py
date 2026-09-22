@@ -1,4 +1,22 @@
+import subprocess
+from typing import Any
+
+import pytest
+
+from lore.schemas import LoreError
 from lore.sources import github
+
+
+def test_get_via_gh_raises_a_lore_error_on_malformed_json_instead_of_json_decode_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fake_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args[0], returncode=0, stdout="not json", stderr="")
+
+    monkeypatch.setattr(github.subprocess, "run", _fake_run)
+
+    with pytest.raises(LoreError, match="could not be parsed as JSON"):
+        github._get_via_gh("repos/owner/repo", 5.0)
 
 
 def test_status_from_gh_stderr_reads_the_parenthesized_http_code() -> None:

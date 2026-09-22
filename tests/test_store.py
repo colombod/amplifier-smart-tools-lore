@@ -56,6 +56,33 @@ def test_split_pages_handles_markers_preamble_and_no_markers() -> None:
     assert store._split_pages(no_markers) == [("Contents", no_markers)]
 
 
+def test_write_wiki_names_the_incomplete_cache_path_on_a_disk_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The index is written after every page, so a failure there leaves pages with no index.
+
+    Simulated by letting the first `_atomic_write` (a page) succeed for real and failing the
+    second (the index), reproducing exactly the interrupted-write state the error must name.
+    """
+    original_atomic_write = store._atomic_write
+    calls = {"count": 0}
+
+    def _flaky(path: Path, text: str) -> None:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            original_atomic_write(path, text)
+            return
+        raise OSError("disk full")
+
+    monkeypatch.setattr(store, "_atomic_write", _flaky)
+    freshness = _freshness("owner/repo")
+
+    with pytest.raises(LoreError) as failure:
+        store.write_wiki("owner/repo", "# Page: One\nbody\n", freshness)
+
+    message = str(failure.value)
+    assert str(store.entry_root("owner/repo", freshness.indexed_sha)) in message
+    assert "lore fetch owner/repo --refresh" in message
+
+
 def test_write_wiki_then_load_index_round_trips() -> None:
     contents = "# Page: First\nfirst body\n# Page: Second\nsecond body\n"
     freshness = _freshness("owner/repo")

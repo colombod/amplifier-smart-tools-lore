@@ -11,6 +11,7 @@ from typing import Any
 from copilot import CopilotClient, PermissionHandler, Tool, ToolInvocation, ToolResult
 import jsonschema
 
+from lore.core.manifest import requirement_install_url
 from lore.intelligence.schemas import AgentRequest, AgentResult
 from lore.schemas import LoreError
 
@@ -38,7 +39,8 @@ class CopilotIntelligence:
             return self._token
         if shutil.which("gh") is None:
             raise LoreError(
-                "Model-backed capabilities need the GitHub CLI. Install gh and sign in with `gh auth login`."
+                "Model-backed capabilities need the GitHub CLI. Install it "
+                f"({requirement_install_url('gh')}) and sign in with `gh auth login`."
             )
         minted = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True)
         if minted.returncode != 0:

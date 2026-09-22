@@ -29,3 +29,36 @@ def build_prompt(repo: str, question: str, wiki_structure: str, deepwiki_answer:
             "Using only the retrieved material above, submit your answer.",
         ]
     )
+
+
+def build_prompt_from_material(repo: str, question: str, material: str) -> str:
+    """The full prompt for one `explain` call grounded in material the caller supplied directly.
+
+    Used in place of `build_prompt` when the caller already holds the material to ground the
+    answer in, so nothing is retrieved from DeepWiki for this call.
+
+    Args:
+        repo: The repository the question is about, as passed to `explain`.
+        question: The question to answer.
+        material: The material the caller supplied in place of DeepWiki's own retrieval.
+
+    Returns:
+        The prompt text, carrying `GROUNDING_RULE` and nothing outside `material`.
+    """
+    intro = (
+        f"You are explaining how the GitHub repository '{repo}' works: its architecture, "
+        "design, and how its pieces are wired."
+    )
+    return "\n\n".join(
+        [
+            intro,
+            GROUNDING_RULE,
+            f"## Question\n{question}",
+            f"## Retrieved: material supplied directly by the caller for {repo}\n{material}",
+            (
+                "This material was supplied directly by the caller rather than retrieved from "
+                'DeepWiki. Cite claims grounded in it with source "caller".'
+            ),
+            "Using only the retrieved material above, submit your answer.",
+        ]
+    )

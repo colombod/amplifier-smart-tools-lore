@@ -217,6 +217,7 @@ def explain(
     model: str = DEFAULT_INTELLIGENCE_MODEL,
     reasoning_effort: ReasoningEffort = "low",
     timeout_seconds: float = 300.0,
+    material: str | None = None,
 ) -> Answer
 ```
 
@@ -224,14 +225,20 @@ def explain(
 - `question`: a question about the repository's architecture, design, or wiring.
 - `model`/`reasoning_effort`: the model to run the synthesis through, and its reasoning effort.
 - `timeout_seconds`: per-request timeout for each retrieval call and the synthesis itself.
+- `material`: retrieved material supplied directly by the caller, used in place of DeepWiki's
+  own retrieval for this call. The payload is data, not a reference: pass the content itself,
+  never a path. `repo`'s freshness is still measured and attached either way, and the
+  never-indexed guard is skipped, since the caller already supplied something to ground the
+  answer in.
 
 Returns an `Answer`: `answer` (grounded only in retrieved material), `citations` (each
-naming `deepwiki` and the page the claim rests on), `unanswered` (parts of the question the
-retrieved material did not cover), `freshness` (the measurement `freshness` would report for
-`repo`), and `caveat`. `caveat` is `None` when the index is current; otherwise it names the
-measured commits and days the index trails the repository by. Raises `LoreError` when
-`repo` does not parse, DeepWiki has no indexed wiki for it, the intelligence implementation
-cannot run, or it produced no usable answer.
+naming `deepwiki`, or `caller` when grounded in `material` instead, and the page or material
+the claim rests on), `unanswered` (parts of the question the retrieved material did not
+cover), `freshness` (the measurement `freshness` would report for `repo`, still measured when
+`material` is given), and `caveat`. `caveat` is `None` when the index is current; otherwise it
+names the measured commits and days the index trails the repository by. Raises `LoreError`
+when `repo` does not parse, DeepWiki has no indexed wiki for it and no `material` was
+supplied, the intelligence implementation cannot run, or it produced no usable answer.
 
 ## Howto
 
@@ -247,6 +254,7 @@ def howto(
     model: str = DEFAULT_INTELLIGENCE_MODEL,
     reasoning_effort: ReasoningEffort = "low",
     timeout_seconds: float = 300.0,
+    material: str | None = None,
 ) -> Answer
 ```
 
@@ -254,14 +262,18 @@ def howto(
 - `task`: the task to explain how to accomplish, e.g. "paginate search results".
 - `model`/`reasoning_effort`: the model to run the synthesis through, and its reasoning effort.
 - `timeout_seconds`: per-request timeout for each retrieval call and the synthesis itself.
+- `material`: retrieved material supplied directly by the caller, used in place of Context7's
+  (and, when `library` also names a GitHub repository, DeepWiki's) own retrieval for this
+  call. The payload is data, not a reference: pass the content itself, never a path.
 
-Returns an `Answer`: `answer`, `citations` (each naming `context7` or `deepwiki`),
-`unanswered`, `freshness` (measured against the repository when Context7 resolved a
-GitHub-backed library; otherwise `unknown`, reporting Context7's own `last_update_date` and
-`state` in its summary instead of a commit-level measurement no such entry has), and
-`caveat` derived from it. Raises `LoreError` when Context7 finds no library matching
-`library`, a retrieval request fails, the intelligence implementation cannot run, or it
-produced no usable answer.
+Returns an `Answer`: `answer`, `citations` (each naming `context7`, `deepwiki`, or `caller`
+when grounded in `material` instead), `unanswered`, `freshness` (measured against the
+repository when Context7 resolved a GitHub-backed library, even with `material` given;
+otherwise `unknown`, reporting Context7's own `last_update_date` and `state` in its summary
+when there is no `material`, or naming that the material was caller-supplied when there is,
+since neither case has a commit to measure against), and `caveat` derived from it. Raises
+`LoreError` when Context7 finds no library matching `library`, a retrieval request fails,
+the intelligence implementation cannot run, or it produced no usable answer.
 
 ## Adding a capability
 

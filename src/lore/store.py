@@ -57,33 +57,46 @@ def entry_root(repo: str, indexed_sha: str | None) -> Path:
 
 
 def write_wiki(repo: str, contents: str, freshness: Freshness) -> WikiIndex:
-    """Split `contents` into pages, write each to disk, and return the index describing them."""
-    root = entry_root(repo, freshness.indexed_sha)
-    entries: list[PageEntry] = []
-    for number, (title, body) in enumerate(_split_pages(contents), start=1):
-        relative_path = f"pages/{number:03d}-{_page_slug(title)}.md"
-        _atomic_write(root / relative_path, body)
-        entries.append(
-            PageEntry(
-                number=number,
-                title=title,
-                path=relative_path,
-                characters=len(body),
-                estimated_tokens=len(body) // CHARS_PER_TOKEN,
-            )
-        )
+    """Split `contents` into pages, write each to disk, and return the index describing them.
 
-    index = WikiIndex(
-        repo=repo,
-        root=str(root),
-        pages=entries,
-        total_characters=sum(entry.characters for entry in entries),
-        total_estimated_tokens=sum(entry.estimated_tokens for entry in entries),
-        freshness=freshness,
-        fetched_at=datetime.now(UTC).isoformat(),
-    )
-    _atomic_write(root / "index.json", index.model_dump_json(indent=2))
-    return index
+    Raises:
+        LoreError: writing a page or the index itself fails partway through. Pages are written
+            before the index, so an interruption can leave pages on disk with no index; the
+            error names that cache path so a caller can clear it rather than trust a half-written
+            entry.
+    """
+    root = entry_root(repo, freshness.indexed_sha)
+    try:
+        entries: list[PageEntry] = []
+        for number, (title, body) in enumerate(_split_pages(contents), start=1):
+            relative_path = f"pages/{number:03d}-{_page_slug(title)}.md"
+            _atomic_write(root / relative_path, body)
+            entries.append(
+                PageEntry(
+                    number=number,
+                    title=title,
+                    path=relative_path,
+                    characters=len(body),
+                    estimated_tokens=len(body) // CHARS_PER_TOKEN,
+                )
+            )
+
+        index = WikiIndex(
+            repo=repo,
+            root=str(root),
+            pages=entries,
+            total_characters=sum(entry.characters for entry in entries),
+            total_estimated_tokens=sum(entry.estimated_tokens for entry in entries),
+            freshness=freshness,
+            fetched_at=datetime.now(UTC).isoformat(),
+        )
+        _atomic_write(root / "index.json", index.model_dump_json(indent=2))
+        return index
+    except OSError as error:
+        raise LoreError(
+            f"Writing the cache for '{repo}' failed partway through: {error}. The cache at {root} may be "
+            f"incomplete; delete it or rerun `lore fetch {repo} --refresh`."
+        ) from error
 
 
 def load_index(repo: str, indexed_sha: str | None = None) -> WikiIndex:
@@ -123,7 +136,10 @@ def read_page(
     returned = text[clamped_start:slice_end]
     truncated = slice_end < total_characters
     next_start = slice_end if truncated else None
-    continuation = f"lore read {repo} --page {entry.number} --start {next_start}" if truncated else None
+    # The page is a positional argument of `lore read`, not an option. A continuation that does
+    # not actually run is worse than none, so `tests/test_continuation_runs.py` invokes this
+    # string against the real CLI rather than asserting on its text.
+    continuation = f"lore read {repo} {entry.number} --start {next_start}" if truncated else None
 
     return ReadResult(
         repo=repo,

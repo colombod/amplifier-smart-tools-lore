@@ -13,7 +13,11 @@ retrieved: every claim carries a citation, and anything not covered is reported 
 selects the model to run the synthesis through, defaulting to `DEFAULT_INTELLIGENCE_MODEL`
 in `schemas.py`. `--reasoning-effort` sets that model's reasoning effort (default `low`).
 `--timeout-seconds` bounds each retrieval call and the synthesis itself (default `300.0`).
-Add `--json` to print the full `Answer` model instead of the rendered answer.
+`--material-file PATH` reads that file and uses its contents in place of Context7's (and,
+when `LIBRARY` resolves to a GitHub-backed library, DeepWiki's) own retrieval; its claims are
+cited with source `caller` instead. The library's own `material` argument takes this content
+directly rather than a path, which is the CLI's convenience alone. Add `--json` to print the
+full `Answer` model instead of the rendered answer.
 
 ```bash
 lore howto context7 "resolve a library id before fetching its documentation"
@@ -27,10 +31,12 @@ result.answer, result.citations, result.unanswered, result.caveat
 ```
 
 Returns an `Answer`: `answer` (grounded only in retrieved material), `citations` (each
-naming `context7` or `deepwiki` and the reference the claim rests on), `unanswered`
-(parts of the task the retrieved material did not cover), `freshness` (measured against the
-repository when Context7 resolved a GitHub-backed library, otherwise Context7's own
-freshness fields), and `caveat` derived from it.
+naming `context7`, `deepwiki`, or `caller` when grounded in `--material-file` instead, and
+the reference the claim rests on), `unanswered` (parts of the task the retrieved material did
+not cover), `freshness` (measured against the repository when Context7 resolved a
+GitHub-backed library; Context7's own freshness fields when it did not; or, with
+`--material-file` and no GitHub-backed library, an `unknown` record naming that the material
+was caller-supplied), and `caveat` derived from it.
 
 ## Failures
 

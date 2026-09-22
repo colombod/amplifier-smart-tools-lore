@@ -189,10 +189,14 @@ class DocsResult(BaseModel):
 
 
 class Citation(BaseModel):
-    """Where one part of an answer came from, so a reader can go check it."""
+    """Where one part of an answer came from, so a reader can go check it.
 
-    source: Literal["deepwiki", "context7"]
-    reference: str = Field(description="Page title, library id, or url the claim rests on")
+    `caller` marks a claim grounded in material the caller supplied directly (`explain`'s or
+    `howto`'s `material` argument) instead of anything retrieved from DeepWiki or Context7.
+    """
+
+    source: Literal["deepwiki", "context7", "caller"]
+    reference: str = Field(description="Page title, library id, url, or 'caller-supplied material' the claim rests on")
 
 
 class Answer(BaseModel):

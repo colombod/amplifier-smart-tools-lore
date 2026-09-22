@@ -3,7 +3,7 @@ smart_tool_format: 1
 name: lore
 version: 0.1.0
 description: >-
-  Answers how to use a library, how a project works, and what its architecture is, from DeepWiki and Context7 - with every answer carrying measured index freshness so stale knowledge is named rather than guessed
+  Answers how to use a library, how a project works, and what its architecture is, from DeepWiki and Context7 - with every answer carrying measured index freshness so stale knowledge is named rather than guessed - reach for it before writing code against a library or repository you do not already know cold, or whenever an answer's age matters
 use_cases:
   - >-
     Understand an unfamiliar open source project before writing code against it. What it is,

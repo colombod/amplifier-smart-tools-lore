@@ -48,8 +48,9 @@ lore check [--timeout-seconds SECONDS] [--json]
 lore fetch REPO [--refresh] [--timeout-seconds SECONDS] [--json]
 ```
 
-`lib.fetch(repo, refresh, timeout_seconds)`. Without `--json`, the page count, totals, and a
-numbered page list, never page content. With `--json`, the full `WikiIndex` model.
+`lib.fetch(repo, refresh, timeout_seconds)`. Without `--json`, the page count, totals, the
+cache path the wiki was written to, and a numbered page list, never page content. With
+`--json`, the full `WikiIndex` model.
 
 ## lore pages
 
@@ -92,22 +93,26 @@ hit. With `--json`, the full `SearchResult` model.
 ## lore explain
 
 ```bash
-lore explain REPO QUESTION [--model MODEL] [--reasoning-effort EFFORT] [--timeout-seconds SECONDS] [--json]
+lore explain REPO QUESTION [--model MODEL] [--reasoning-effort EFFORT] [--timeout-seconds SECONDS] [--material-file PATH] [--json]
 ```
 
-`lib.explain(repo, question, model, reasoning_effort, timeout_seconds)`. Without `--json`,
-the caveat first when there is one, then the answer, then citations, then anything
-unanswered. With `--json`, the full `Answer` model.
+`lib.explain(repo, question, model, reasoning_effort, timeout_seconds, material)`, where
+`--material-file` is read and its contents passed as `material`; reading a path is the CLI's
+own convenience, the library takes the content directly. Without `--json`, the caveat first
+when there is one, then the answer, then citations, then anything unanswered. With `--json`,
+the full `Answer` model.
 
 ## lore howto
 
 ```bash
-lore howto LIBRARY TASK [--model MODEL] [--reasoning-effort EFFORT] [--timeout-seconds SECONDS] [--json]
+lore howto LIBRARY TASK [--model MODEL] [--reasoning-effort EFFORT] [--timeout-seconds SECONDS] [--material-file PATH] [--json]
 ```
 
-`lib.howto(library, task, model, reasoning_effort, timeout_seconds)`. Without `--json`, the
-caveat first when there is one, then the answer, then citations, then anything unanswered.
-With `--json`, the full `Answer` model.
+`lib.howto(library, task, model, reasoning_effort, timeout_seconds, material)`, where
+`--material-file` is read and its contents passed as `material`; reading a path is the CLI's
+own convenience, the library takes the content directly. Without `--json`, the caveat first
+when there is one, then the answer, then citations, then anything unanswered. With `--json`,
+the full `Answer` model.
 
 ## Adding a command
 

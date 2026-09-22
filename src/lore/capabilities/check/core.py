@@ -11,6 +11,7 @@ import subprocess
 import httpx
 
 from lore import store
+from lore.core.manifest import requirement_install_url
 from lore.schemas import CheckResult, LoreError, Reachability, RepoRef
 from lore.sources import context7, deepwiki, github
 
@@ -121,7 +122,10 @@ def _copilot_prerequisite() -> Reachability:
     detail = (
         "gh is installed and signed in."
         if authenticated
-        else "gh must be installed and `gh auth login` completed, with a Copilot subscription on that account."
+        else (
+            f"gh must be installed ({requirement_install_url('gh')}) and `gh auth login` completed, "
+            "with a Copilot subscription on that account."
+        )
     )
     return Reachability(name=_COPILOT_NAME, ok=authenticated, detail=detail)
 
