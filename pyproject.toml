@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "github-copilot-sdk>=1.0.13,<2.0.0",
+    "httpx>=0.28.1,<0.29.0",
     "jsonschema>=4.26.0,<5.0.0",
     "pydantic>=2.13,<3.0",
     "pyyaml>=6.0.3,<7.0.0",

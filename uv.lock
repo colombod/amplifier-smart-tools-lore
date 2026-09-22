@@ -161,6 +161,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "github-copilot-sdk" },
+    { name = "httpx" },
     { name = "jsonschema" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -178,6 +179,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "github-copilot-sdk", specifier = ">=1.0.13,<2.0.0" },
+    { name = "httpx", specifier = ">=0.28.1,<0.29.0" },
     { name = "jsonschema", specifier = ">=4.26.0,<5.0.0" },
     { name = "pydantic", specifier = ">=2.13,<3.0" },
     { name = "pyyaml", specifier = ">=6.0.3,<7.0.0" },

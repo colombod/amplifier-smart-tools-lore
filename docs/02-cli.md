@@ -24,6 +24,91 @@ lore manifest
 
 `lib.load_manifest()`, printed as JSON.
 
+## lore freshness
+
+```bash
+lore freshness REPO [--timeout-seconds SECONDS] [--json]
+```
+
+`lib.freshness(repo, timeout_seconds)`. Without `--json`, prints one line: the verdict and the
+summary. With `--json`, the full `Freshness` model.
+
+## lore check
+
+```bash
+lore check [--timeout-seconds SECONDS] [--json]
+```
+
+`lib.check(timeout_seconds)`. Without `--json`, one line per prerequisite plus a line for
+`deterministic_ready`/`model_backed_ready`. With `--json`, the full `CheckResult` model.
+
+## lore fetch
+
+```bash
+lore fetch REPO [--refresh] [--timeout-seconds SECONDS] [--json]
+```
+
+`lib.fetch(repo, refresh, timeout_seconds)`. Without `--json`, the page count, totals, and a
+numbered page list, never page content. With `--json`, the full `WikiIndex` model.
+
+## lore pages
+
+```bash
+lore pages REPO [--json]
+```
+
+`lib.pages(repo)`. Without `--json`, the page count, totals, and a numbered page list, never
+page content. With `--json`, the full `WikiIndex` model.
+
+## lore read
+
+```bash
+lore read REPO PAGE [--start N] [--limit N] [--json]
+```
+
+`lib.read(repo, page, start, limit)`, where `PAGE` is converted to an integer when it parses
+as one, otherwise passed through as a title substring. Without `--json`, the slice's text; a
+truncated result also prints, to stderr, how many characters remain and the exact command to
+continue. With `--json`, the full `ReadResult` model.
+
+## lore docs
+
+```bash
+lore docs LIBRARY TOPIC [--timeout-seconds SECONDS] [--json]
+```
+
+`lib.docs(library, topic, timeout_seconds)`. Without `--json`, the resolved library id, size,
+path, and the preview. With `--json`, the full `DocsResult` model.
+
+## lore search
+
+```bash
+lore search REPO PATTERN [--max-hits N] [--json]
+```
+
+`lib.search(repo, pattern, max_hits)`. Without `--json`, the total hit count and one line per
+hit. With `--json`, the full `SearchResult` model.
+
+## lore explain
+
+```bash
+lore explain REPO QUESTION [--model MODEL] [--reasoning-effort EFFORT] [--timeout-seconds SECONDS] [--json]
+```
+
+`lib.explain(repo, question, model, reasoning_effort, timeout_seconds)`. Without `--json`,
+the caveat first when there is one, then the answer, then citations, then anything
+unanswered. With `--json`, the full `Answer` model.
+
+## lore howto
+
+```bash
+lore howto LIBRARY TASK [--model MODEL] [--reasoning-effort EFFORT] [--timeout-seconds SECONDS] [--json]
+```
+
+`lib.howto(library, task, model, reasoning_effort, timeout_seconds)`. Without `--json`, the
+caveat first when there is one, then the answer, then citations, then anything unanswered.
+With `--json`, the full `Answer` model.
+
 ## Adding a command
 
 Each command gets a section here: the invocation shape with its options and defaults, which library function it calls, and what it prints and exits with. Argument meanings belong in the library reference, not here.

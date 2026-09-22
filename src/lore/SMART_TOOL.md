@@ -6,7 +6,20 @@ description: >-
   Answers how to use a library, how a project works, and what its architecture is, from DeepWiki and Context7 - with every answer carrying measured index freshness so stale knowledge is named rather than guessed
 use_cases:
   - >-
-    Answers how to use a library, how a project works, and what its architecture is, from DeepWiki and Context7 - with every answer carrying measured index freshness so stale knowledge is named rather than guessed
+    Understand an unfamiliar open source project before writing code against it. What it is,
+    how its pieces fit, and where the extension points are.
+  - >-
+    Get current usage guidance for a library, with runnable snippets and citations, instead of
+    an answer drawn from a model's training memory.
+  - >-
+    Measure how far behind a repository DeepWiki's index actually is, in commits and days,
+    before trusting anything drawn from it.
+  - >-
+    Work with a generated wiki far larger than a context window, by putting it on disk and
+    reading bounded slices of it.
+  - >-
+    Search a project's documentation for a term and get back page, line, and snippet rather
+    than the whole wiki.
 platforms:
   - linux
   - macos
@@ -33,7 +46,28 @@ wrapper over it, so anything you can do from the shell you can also do from Pyth
 
 ## When to reach for it
 
-- Answers how to use a library, how a project works, and what its architecture is, from DeepWiki and Context7 - with every answer carrying measured index freshness so stale knowledge is named rather than guessed.
+Reach for it before writing code against a library or repository you do not already know
+cold, and whenever an answer's age matters.
+
+- "How do I use X" or "how does X work" for a public GitHub project or a published library.
+- Before implementing against an SDK or API, to get real signatures rather than remembered ones.
+- When a wiki or documentation set is too large to read, and you need a map and bounded reads.
+- When you need to know whether the documentation you are about to trust is current.
+
+Do not reach for it for code-level ground truth at a specific ref. Clone the repository and
+read the source for that. This tool covers the layer above: what a project is, how it fits
+together, and how it is meant to be driven.
+
+## Sharp edges
+
+- DeepWiki covers public repositories, and only those it has indexed. An unindexed repository
+  is reported as such, with the URL that triggers indexing, rather than answered around.
+- A DeepWiki index can trail the repository badly. Every model-backed answer carries the
+  measured gap, and a `stale` verdict means API details in the answer may have moved.
+- The model-backed capabilities answer only from what was retrieved in that run. What the
+  sources did not cover comes back under `unanswered` rather than filled in.
+- Grounding gives source fidelity, not omniscience: a citation means the sources said it,
+  which is a stronger claim than a remembered answer but weaker than reading the code.
 
 ## Before writing code
 

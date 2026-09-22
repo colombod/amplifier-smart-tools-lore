@@ -13,6 +13,60 @@ DISTRIBUTION = "lore"
 # the Markdown beside its code, at `capabilities/<name>/SKILL.md`.
 CAPABILITIES = (
     Capability("manifest", "Print the tool's manifest as JSON.", model_backed=False, skill="core/manifest.md"),
+    Capability(
+        "freshness",
+        "Measure how far DeepWiki's index for a repository trails its live default branch.",
+        model_backed=False,
+        skill="capabilities/freshness/SKILL.md",
+    ),
+    Capability(
+        "check",
+        "Report whether lore's prerequisites are reachable right now.",
+        model_backed=False,
+        skill="capabilities/check/SKILL.md",
+    ),
+    Capability(
+        "fetch",
+        "Write a repository's DeepWiki wiki to the cache and return its index, never its content.",
+        model_backed=False,
+        skill="capabilities/fetch/SKILL.md",
+    ),
+    Capability(
+        "pages",
+        "Print the cached wiki index for a repository.",
+        model_backed=False,
+        skill="capabilities/pages/SKILL.md",
+    ),
+    Capability(
+        "read",
+        "Read a bounded slice of one cached wiki page.",
+        model_backed=False,
+        skill="capabilities/read/SKILL.md",
+    ),
+    Capability(
+        "docs",
+        "Fetch Context7 documentation for a library, written to disk and previewed.",
+        model_backed=False,
+        skill="capabilities/docs/SKILL.md",
+    ),
+    Capability(
+        "search",
+        "Search one repository's cached wiki for a pattern.",
+        model_backed=False,
+        skill="capabilities/search/SKILL.md",
+    ),
+    Capability(
+        "explain",
+        "Explain how a project works, its architecture, and how its pieces are wired, grounded in DeepWiki.",
+        model_backed=True,
+        skill="capabilities/explain/SKILL.md",
+    ),
+    Capability(
+        "howto",
+        "Explain how to use a library for a task, grounded in Context7's retrieved snippets.",
+        model_backed=True,
+        skill="capabilities/howto/SKILL.md",
+    ),
 )
 
 # Paths relative to the skill directory. Both ship inside the package, so both resolve after installation.
