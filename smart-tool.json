@@ -1,0 +1,5 @@
+{
+  "manifest": "src/lore/SMART_TOOL.md",
+  "cli_argv": ["lore"],
+  "deterministic_smoke": ["manifest"]
+}
