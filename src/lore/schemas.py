@@ -216,11 +216,16 @@ class Answer(BaseModel):
 
 
 class Reachability(BaseModel):
-    """One prerequisite of the tool, and whether it is usable right now."""
+    """One prerequisite of the tool, and whether it is usable right now.
+
+    `optional` mirrors the manifest requirement of the same prerequisite, when one is
+    declared: an unsatisfied optional prerequisite is a reported state, not a failure.
+    """
 
     name: str
     ok: bool
     detail: str
+    optional: bool = False
 
 
 class CheckResult(BaseModel):

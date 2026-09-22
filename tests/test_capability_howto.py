@@ -4,7 +4,7 @@ from lore.capabilities.howto import core
 from lore.capabilities.howto.prompt import build_prompt, build_prompt_from_material
 from lore.grounding import GROUNDING_RULE
 from lore.intelligence.schemas import AgentRequest, AgentResult
-from lore.schemas import Freshness, LibraryRef, LoreError
+from lore.schemas import LibraryRef, LoreError
 
 
 class _PreflightFailsIntelligence:

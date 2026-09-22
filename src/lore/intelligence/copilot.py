@@ -27,6 +27,13 @@ class CopilotIntelligence:
         self._token: str | None = None
 
     def preflight(self) -> None:
+        """Checked up front, cheaply: `gh` is installed and a token can be minted.
+
+        Not checked here: whether the account that token belongs to actually has a Copilot
+        subscription. There is no cheap way to learn that without a model call, so it is not
+        probed for. When the account lacks one, it surfaces on first use instead: `run` raises
+        a `LoreError` naming the `github-copilot-subscription` requirement.
+        """
         self._github_token()
 
     def run(self, request: AgentRequest) -> AgentResult:
@@ -132,10 +139,40 @@ class CopilotIntelligence:
                 error=f"The agent did not finish within {request.timeout_seconds} seconds.", session_id=session_id
             )
         except Exception as error:  # an SDK or runtime failure is the caller's data, not a crash
-            return AgentResult(error=f"{type(error).__name__}: {error}", session_id=session_id)
+            return _agent_result_for_failure(error, session_id)
         finally:
             with contextlib.suppress(Exception):
                 await client.stop()
+
+
+# Markers observed in the Copilot CLI/SDK's own failure text when the signed-in account has
+# no usable Copilot entitlement, e.g. "Failed to fetch token entitlements: Server returned 403".
+# The SDK does not raise a distinct exception type for this, so matching the message is a
+# heuristic, not a guaranteed classification: anything that does not match is still reported
+# through `AgentResult.error` as a plain agent-run failure.
+_ENTITLEMENT_FAILURE_MARKERS = ("401", "403", "unauthorized", "forbidden", "entitlement")
+
+
+def _is_entitlement_failure(error: Exception) -> bool:
+    """Whether `error` looks like the signed-in `gh` account lacking a usable Copilot entitlement."""
+    message = str(error).lower()
+    return any(marker in message for marker in _ENTITLEMENT_FAILURE_MARKERS)
+
+
+def _agent_result_for_failure(error: Exception, session_id: str | None) -> AgentResult:
+    """What `_run` reports for a failure caught at its boundary.
+
+    Raises `LoreError` for the narrow class of failure that means the account signed in to
+    `gh` has no usable Copilot entitlement: an environment problem `preflight` could not check
+    cheaply, the same category it already raises for. Anything else is a plain in-flight agent
+    failure, reported through `AgentResult.error` as usual, never raised.
+    """
+    if _is_entitlement_failure(error):
+        raise LoreError(
+            f"GitHub Copilot rejected this request: {error}. The account signed in to `gh` needs "
+            f"a Copilot subscription ({requirement_install_url('github-copilot-subscription')})."
+        ) from error
+    return AgentResult(error=f"{type(error).__name__}: {error}", session_id=session_id)
 
 
 def _submission_problem(submitted: dict[str, Any] | None, schema: dict[str, Any]) -> str | None:

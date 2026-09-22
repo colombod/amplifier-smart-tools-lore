@@ -39,8 +39,9 @@ summary. With `--json`, the full `Freshness` model.
 lore check [--timeout-seconds SECONDS] [--json]
 ```
 
-`lib.check(timeout_seconds)`. Without `--json`, one line per prerequisite plus a line for
-`deterministic_ready`/`model_backed_ready`. With `--json`, the full `CheckResult` model.
+`lib.check(timeout_seconds)`. Without `--json`, one line per prerequisite (`[ok]`, `[optional]`,
+or `[FAIL]`) plus a line for `deterministic_ready`/`model_backed_ready`. With `--json`, the full
+`CheckResult` model.
 
 ## lore fetch
 

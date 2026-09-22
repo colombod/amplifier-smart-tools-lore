@@ -36,3 +36,25 @@ def requirement_install_url(name: str) -> str:
             return requirement.install
     known = ", ".join(requirement.name for requirement in manifest.requires)
     raise LoreError(f"'{name}' is not a requirement in the manifest. Requirements are: {known}.")
+
+
+def requirement_optional(name: str) -> bool:
+    """Whether the manifest declares the requirement named `name` optional.
+
+    The single source `check` reads to decide between rendering an unsatisfied
+    prerequisite `[optional]` or `[FAIL]`, so that decision can never drift into a second
+    opinion hardcoded alongside the check itself.
+
+    Args:
+        name: The requirement's name, e.g. `gh`.
+
+    Returns:
+        `True` when the manifest declares that requirement `optional: true`. `False` when
+        it is declared required, or when no requirement named `name` exists: an undeclared
+        requirement carries no opinion on optionality, so it defaults to required.
+    """
+    manifest = load_manifest()
+    for requirement in manifest.requires:
+        if requirement.name == name:
+            return requirement.optional
+    return False

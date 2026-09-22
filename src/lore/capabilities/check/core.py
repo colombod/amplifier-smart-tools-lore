@@ -1,7 +1,10 @@
 """Check: whether lore's prerequisites are reachable right now, deterministic and model-backed alike.
 
 Every probe here is cheap and never raises: an unreachable service is a reported `ok=False`
-with a `detail` naming what to do, never a failure of `check` itself.
+with a `detail` naming what to do, never a failure of `check` itself. `optional` mirrors
+what the manifest declares for that prerequisite, read through `requirement_optional`
+rather than hardcoded here, so an unreachable optional prerequisite is a reported state
+and not a false alarm.
 """
 
 import os
@@ -11,7 +14,7 @@ import subprocess
 import httpx
 
 from lore import store
-from lore.core.manifest import requirement_install_url
+from lore.core.manifest import requirement_install_url, requirement_optional
 from lore.schemas import CheckResult, LoreError, Reachability, RepoRef
 from lore.sources import context7, deepwiki, github
 
@@ -101,7 +104,9 @@ def _context7_api_key() -> Reachability:
     """Whether the optional Context7 API key is set. Anonymous access works without it."""
     is_set = bool(os.environ.get(context7.API_KEY_ENV))
     detail = "Set." if is_set else f"Not set. Optional: {context7.API_KEY_ENV} lifts Context7's anonymous limits."
-    return Reachability(name=context7.API_KEY_ENV, ok=is_set, detail=detail)
+    return Reachability(
+        name=context7.API_KEY_ENV, ok=is_set, detail=detail, optional=requirement_optional("context7-api-key")
+    )
 
 
 def _cache_directory() -> Reachability:
@@ -127,7 +132,7 @@ def _copilot_prerequisite() -> Reachability:
             "with a Copilot subscription on that account."
         )
     )
-    return Reachability(name=_COPILOT_NAME, ok=authenticated, detail=detail)
+    return Reachability(name=_COPILOT_NAME, ok=authenticated, detail=detail, optional=requirement_optional("gh"))
 
 
 def _gh_authenticated() -> bool:

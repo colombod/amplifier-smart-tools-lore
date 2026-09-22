@@ -142,6 +142,14 @@ def test_answer_from_result_raises_when_output_is_empty() -> None:
         grounding.answer_from_result("q", "owner/repo", result, freshness)
 
 
+def test_answer_from_result_names_a_remedy_when_output_is_missing() -> None:
+    freshness = _freshness("current")
+    result = AgentResult(output={})
+
+    with pytest.raises(LoreError, match="Retry the call"):
+        grounding.answer_from_result("q", "owner/repo", result, freshness)
+
+
 def test_answer_from_result_raises_when_output_is_none() -> None:
     freshness = _freshness("current")
     result = AgentResult(output=None)
@@ -155,6 +163,14 @@ def test_answer_from_result_raises_when_the_answer_text_is_empty() -> None:
     result = AgentResult(output={"answer": "   ", "citations": [], "unanswered": []})
 
     with pytest.raises(LoreError, match="was empty"):
+        grounding.answer_from_result("q", "owner/repo", result, freshness)
+
+
+def test_answer_from_result_names_a_remedy_when_the_answer_text_is_empty() -> None:
+    freshness = _freshness("current")
+    result = AgentResult(output={"answer": "   ", "citations": [], "unanswered": []})
+
+    with pytest.raises(LoreError, match="Retry, or narrow the question"):
         grounding.answer_from_result("q", "owner/repo", result, freshness)
 
 

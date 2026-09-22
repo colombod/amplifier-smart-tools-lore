@@ -37,6 +37,12 @@ requires:
       capabilities. Without it, only the deterministic capabilities run.
     optional: true
     install: https://github.com/github/copilot-cli#prerequisites
+  - name: context7-api-key
+    purpose: >-
+      Lifts Context7's anonymous rate limits for docs and howto retrieval. Anonymous
+      access already works without it.
+    optional: true
+    install: https://context7.com/dashboard
 ---
 
 Answers how to use a library, how a project works, and what its architecture is, from DeepWiki and Context7 - with every answer carrying measured index freshness so stale knowledge is named rather than guessed.

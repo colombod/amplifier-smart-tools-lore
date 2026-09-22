@@ -5,7 +5,7 @@ import pytest
 from typer.testing import CliRunner
 
 from lore import cli, lib
-from lore.schemas import Answer, Freshness, PageEntry, WikiIndex
+from lore.schemas import Answer, CheckResult, Freshness, PageEntry, Reachability, WikiIndex
 
 runner = CliRunner()
 
@@ -112,3 +112,26 @@ def test_howto_material_file_reads_the_file_and_passes_its_contents_to_the_libra
 
     assert result.exit_code == 0
     assert captured["material"] == "Some docs text."
+
+
+def test_check_renders_an_unsatisfied_optional_prerequisite_as_optional_not_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    check_result = CheckResult(
+        checks=[
+            Reachability(name="required thing", ok=False, detail="down", optional=False),
+            Reachability(name="optional thing", ok=False, detail="not set", optional=True),
+            Reachability(name="satisfied thing", ok=True, detail="fine", optional=True),
+        ],
+        deterministic_ready=False,
+        model_backed_ready=False,
+    )
+    monkeypatch.setattr(lib, "check", lambda timeout_seconds=15.0: check_result)
+
+    result = runner.invoke(cli.app, ["check"])
+
+    assert result.exit_code == 0
+    lines = result.stdout.splitlines()
+    assert "[FAIL] required thing: down" in lines
+    assert "[optional] optional thing: not set" in lines
+    assert "[ok] satisfied thing: fine" in lines

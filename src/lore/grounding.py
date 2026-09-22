@@ -123,10 +123,16 @@ def answer_from_result(question: str, target: str, result: AgentResult, freshnes
             "confirm the signed-in account has an active GitHub Copilot subscription, or retry."
         )
     if not result.output:
-        raise LoreError(f"The model returned no structured output for '{target}'.")
+        raise LoreError(
+            f"The model returned no structured output for '{target}'. Retry the call; if it keeps "
+            "happening, raise --reasoning-effort so the model is more likely to reach the submit step."
+        )
     answer_text = result.output.get("answer")
     if not isinstance(answer_text, str) or not answer_text.strip():
-        raise LoreError(f"The model's answer for '{target}' was empty.")
+        raise LoreError(
+            f"The model's answer for '{target}' was empty. Retry, or narrow the question so there is "
+            "less ground for it to cover in one pass."
+        )
     try:
         citations = [Citation.model_validate(entry) for entry in result.output.get("citations") or []]
     except ValidationError as error:

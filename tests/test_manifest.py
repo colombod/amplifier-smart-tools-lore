@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from lore.core.manifest import MANIFEST_PATH, requirement_install_url
+from lore.core.manifest import MANIFEST_PATH, requirement_install_url, requirement_optional
 from lore.lib import load_manifest
 from lore.schemas import LoreError
 
@@ -30,6 +30,18 @@ def test_requirement_install_url_reads_the_gh_requirement_from_the_manifest() ->
 def test_requirement_install_url_names_the_known_requirements_for_an_unknown_name() -> None:
     with pytest.raises(LoreError, match="gh"):
         requirement_install_url("not-a-requirement")
+
+
+def test_requirement_optional_reads_true_for_a_requirement_the_manifest_declares_optional() -> None:
+    manifest = load_manifest()
+    gh_requirement = next(requirement for requirement in manifest.requires if requirement.name == "gh")
+
+    assert gh_requirement.optional is True
+    assert requirement_optional("gh") == gh_requirement.optional
+
+
+def test_requirement_optional_defaults_to_false_for_an_undeclared_requirement() -> None:
+    assert requirement_optional("not-a-requirement") is False
 
 
 def test_description_is_consistent_everywhere_it_is_duplicated() -> None:

@@ -12,7 +12,14 @@ from typer.core import TyperCommand, TyperOption
 from typer.models import CommandFunctionType
 
 from lore import lib
-from lore.schemas import DEFAULT_INTELLIGENCE_MODEL, DEFAULT_READ_LIMIT, Answer, LoreError, ReasoningEffort
+from lore.schemas import (
+    DEFAULT_INTELLIGENCE_MODEL,
+    DEFAULT_READ_LIMIT,
+    Answer,
+    LoreError,
+    Reachability,
+    ReasoningEffort,
+)
 
 
 class CapabilityCommand(TyperCommand):
@@ -123,8 +130,17 @@ def check(
         typer.echo(result.model_dump_json(indent=2))
         return
     for entry in result.checks:
-        typer.echo(f"[{'ok' if entry.ok else 'FAIL'}] {entry.name}: {entry.detail}")
+        typer.echo(f"[{_reachability_status(entry)}] {entry.name}: {entry.detail}")
     typer.echo(f"deterministic_ready={result.deterministic_ready} model_backed_ready={result.model_backed_ready}")
+
+
+def _reachability_status(entry: Reachability) -> str:
+    """`ok` when satisfied; `optional` when not satisfied but the manifest declares it optional; else `FAIL`."""
+    if entry.ok:
+        return "ok"
+    if entry.optional:
+        return "optional"
+    return "FAIL"
 
 
 @app.command()

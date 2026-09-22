@@ -12,6 +12,12 @@ Install:
 - [GitHub CLI](https://cli.github.com/) for intelligence features with GitHub Copilot.
 - [GitHub Copilot subscription](https://github.com/github/copilot-cli#prerequisites) for intelligent features.
 
+`requires-python = ">=3.13"` in `pyproject.toml` has no upper bound, so `uv tool install` picks
+whatever the newest matching interpreter on the machine is, not necessarily the `.python-version`
+pin (`3.13`) this repository develops against. There is no CI in this repository (no `.github/`
+directory) enforcing either version. Verified by hand: `uv sync`, `uv run pytest`,
+`uv run ty check .`, and `uv run ruff check` all pass under 3.13 and 3.14.
+
 ### Initial Setup
 
 1. Clone this repository and change into it.

@@ -103,7 +103,8 @@ repository.
 Whether lore's prerequisites are reachable right now: DeepWiki's MCP endpoint, deepwiki.com,
 the Context7 API, the GitHub API, the optional Context7 API key, the cache directory, and the
 model-backed capabilities' own prerequisite. Deterministic. Never raises for an unreachable
-prerequisite; that is a reported `ok=False`.
+prerequisite; that is a reported `ok=False`. A prerequisite the manifest declares optional is
+never reported as a failure when unsatisfied.
 
 ```python
 def check(timeout_seconds: float = 15.0) -> CheckResult
@@ -111,9 +112,10 @@ def check(timeout_seconds: float = 15.0) -> CheckResult
 
 - `timeout_seconds`: per-probe network timeout.
 
-Returns a `CheckResult`: `checks` (one `Reachability` per prerequisite), `deterministic_ready`
-(DeepWiki, GitHub, and the cache all usable with no credentials), and `model_backed_ready`
-(`gh` installed and signed in).
+Returns a `CheckResult`: `checks` (one `Reachability` per prerequisite: `name`, `ok`, `detail`,
+`optional`), `deterministic_ready` (DeepWiki, GitHub, and the cache all usable with no
+credentials), and `model_backed_ready` (`gh` installed and signed in). `optional` mirrors the
+manifest requirement of the same prerequisite, when one is declared.
 
 ## Fetch
 
