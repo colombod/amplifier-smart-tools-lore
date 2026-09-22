@@ -193,6 +193,7 @@ def test_at_head_grounds_on_fetched_source_and_citations_carry_the_head_ref(monk
     freshness = _freshness(indexed_sha="abc123", head_sha="def456", verdict="stale")
     store.write_wiki("owner/repo", WIKI_TEXT, freshness)
     _patch_measure(monkeypatch, freshness)
+    _patch_changed(monkeypatch, [])
 
     def _must_not_be_called(*_args: object, **_kwargs: object) -> str:
         raise AssertionError("--at-head must not retrieve from DeepWiki's own ask/structure tools")
@@ -224,6 +225,7 @@ def test_at_head_reports_a_file_missing_at_head_as_information_not_a_failure(
     freshness = _freshness(indexed_sha="abc123", head_sha="def456", verdict="stale")
     store.write_wiki("owner/repo", WIKI_TEXT, freshness)
     _patch_measure(monkeypatch, freshness)
+    _patch_changed(monkeypatch, [])
     monkeypatch.setattr(core.deepwiki, "read_wiki_structure", lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
     monkeypatch.setattr(core.deepwiki, "ask", lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
 
@@ -246,6 +248,41 @@ def test_at_head_reports_a_file_missing_at_head_as_information_not_a_failure(
     ]
 
 
+def test_at_head_reports_a_binary_file_as_not_text_and_still_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cited binary file (e.g. an image) is recorded `not_text` and the call still succeeds.
+
+    The measured live defect: the fetch succeeds (GitHub returns exactly the bytes asked for),
+    so this must not be folded into the generic retrieval-failure path that takes the whole
+    call down. It is information about the file, exactly like a confirmed 404.
+    """
+    freshness = _freshness(indexed_sha="abc123", head_sha="def456", verdict="stale")
+    store.write_wiki("owner/repo", WIKI_TEXT, freshness)
+    _patch_measure(monkeypatch, freshness)
+    _patch_changed(monkeypatch, [])
+    monkeypatch.setattr(core.deepwiki, "read_wiki_structure", lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
+    monkeypatch.setattr(core.deepwiki, "ask", lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
+
+    def _binary(ref: object, path: str, ref_sha: str, timeout_seconds: float = 30.0) -> str:
+        raise core.github.FileNotTextAtRefError(
+            f"'{path}' in owner/repo at {ref_sha} is not valid UTF-8 text (e.g. a binary file)."
+        )
+
+    monkeypatch.setattr(core.github, "file_at_ref", _binary)
+    engine = _RecordingIntelligence()
+
+    answer = core.explain("owner/repo", "How does the session store work?", at_head=True, intelligence=engine)
+
+    prompt = engine.requests[0].prompt
+    assert "not text at head" in prompt
+    assert "packages/mcp/src/lib/sessionStore.ts" in prompt
+    assert answer.freshness.verdict == "current"
+    assert answer.at_head_files == [
+        core.AtHeadFileStatus(path="packages/mcp/src/lib/sessionStore.ts", status="not_text")
+    ]
+
+
 def test_at_head_fails_the_whole_call_when_a_fetch_fails_for_a_reason_other_than_a_confirmed_404(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -256,6 +293,7 @@ def test_at_head_fails_the_whole_call_when_a_fetch_fails_for_a_reason_other_than
     freshness = _freshness(indexed_sha="abc123", head_sha="def456", verdict="stale")
     store.write_wiki("owner/repo", WIKI_TEXT, freshness)
     _patch_measure(monkeypatch, freshness)
+    _patch_changed(monkeypatch, [])
     monkeypatch.setattr(core.deepwiki, "read_wiki_structure", lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
     monkeypatch.setattr(core.deepwiki, "ask", lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
 
@@ -283,6 +321,7 @@ def test_at_head_file_statuses_classifies_each_list_into_its_own_status() -> Non
         included=[("a.py", "text a"), ("b.py", "text b")],
         excluded=["c.py"],
         missing=["d.py"],
+        not_text=["e.png"],
     )
 
     assert statuses == [
@@ -290,6 +329,7 @@ def test_at_head_file_statuses_classifies_each_list_into_its_own_status() -> Non
         core.AtHeadFileStatus(path="b.py", status="included"),
         core.AtHeadFileStatus(path="c.py", status="excluded_for_budget"),
         core.AtHeadFileStatus(path="d.py", status="missing_at_head"),
+        core.AtHeadFileStatus(path="e.png", status="not_text"),
     ]
 
 

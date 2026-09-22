@@ -4,7 +4,7 @@ from typing import Any
 import httpx
 import pytest
 
-from lore.schemas import FileAbsentAtRefError, LoreError, RepoRef
+from lore.schemas import FileAbsentAtRefError, FileNotTextAtRefError, LoreError, RepoRef
 from lore.sources import github
 
 REPO = RepoRef(owner="upstash", repo="context7")
@@ -186,6 +186,40 @@ def test_file_at_ref_raises_when_the_response_carries_no_base64_content(monkeypa
 
     with pytest.raises(LoreError, match="did not carry base64 content"):
         github.file_at_ref(REPO, "a.py", "main")
+
+
+def test_file_at_ref_raises_the_distinct_not_text_type_only_for_a_decode_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The measured live defect: a binary file's fetch succeeds, so it must be told apart from
+
+    a retrieval failure by type, exactly like a confirmed 404 is.
+    """
+    import base64
+
+    encoded = base64.b64encode(b"\x89PNG\r\n\x1a\n\x00\x01\x02").decode("ascii")
+    monkeypatch.setattr(
+        github, "_get", lambda path, timeout_seconds: (httpx.codes.OK, {"content": encoded, "encoding": "base64"})
+    )
+
+    with pytest.raises(FileNotTextAtRefError, match="not valid UTF-8"):
+        github.file_at_ref(REPO, "cover.png", "main")
+
+
+def test_file_at_ref_raises_the_plain_base_type_not_the_not_text_type_for_invalid_base64(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A malformed response (bad base64) is a transport-level failure, not 'this file is binary'."""
+    monkeypatch.setattr(
+        github,
+        "_get",
+        lambda path, timeout_seconds: (httpx.codes.OK, {"content": "not-valid-base64!!!", "encoding": "base64"}),
+    )
+
+    with pytest.raises(LoreError) as excinfo:
+        github.file_at_ref(REPO, "a.py", "main")
+
+    assert not isinstance(excinfo.value, FileNotTextAtRefError)
 
 
 def test_get_via_http_names_a_remedy_when_the_request_itself_fails(monkeypatch: pytest.MonkeyPatch) -> None:

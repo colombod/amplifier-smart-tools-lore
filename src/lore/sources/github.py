@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 import httpx
 
-from lore.schemas import FileAbsentAtRefError, FileChange, FileStatus, LoreError, RepoRef
+from lore.schemas import FileAbsentAtRefError, FileChange, FileNotTextAtRefError, FileStatus, LoreError, RepoRef
 
 API_BASE = "https://api.github.com"
 TOKEN_ENV = "GITHUB_TOKEN"
@@ -122,9 +122,14 @@ def file_at_ref(repo: RepoRef, path: str, ref: str, timeout_seconds: float = 30.
         FileAbsentAtRefError: GitHub confirms with a 404 that `path` does not exist at `ref`.
             A caller (see `explain --at-head`) may treat this, and only this, as information
             about the citation rather than a retrieval failure.
+        FileNotTextAtRefError: GitHub fetched `path` at `ref` successfully and its content is
+            not valid UTF-8 (e.g. a binary file). The fetch itself succeeded, so a caller may
+            treat this, like `FileAbsentAtRefError`, as information about the file rather than
+            a retrieval failure.
         LoreError: any other failure: a non-200/404 status, a rate limit, a network error, or a
-            response that could not be read or decoded. None of these are evidence the file is
-            absent, and a caller must not reclassify them as such.
+            response that could not be read or whose content was not valid base64. None of
+            these are evidence about the file itself, and a caller must not reclassify them as
+            such.
     """
     encoded_path = "/".join(quote(segment, safe="") for segment in path.split("/"))
     status, body = _get(f"repos/{repo.owner}/{repo.repo}/contents/{encoded_path}?ref={ref}", timeout_seconds)
@@ -146,11 +151,26 @@ def file_at_ref(repo: RepoRef, path: str, ref: str, timeout_seconds: float = 30.
             f"?ref={ref}` directly to inspect the raw response."
         )
     try:
-        return base64.b64decode(content).decode("utf-8")
-    except (binascii.Error, UnicodeDecodeError) as error:
+        raw = base64.b64decode(content)
+    except binascii.Error as error:
         raise LoreError(
-            f"Could not decode {repo.slug}'s '{path}' at {ref}: {error}. The file may not be valid "
-            "UTF-8 text (e.g. a binary file); --at-head only supports text files."
+            f"Could not decode {repo.slug}'s '{path}' at {ref}: {error}. GitHub's response did not "
+            "carry valid base64 content. Retry; if it keeps happening, run "
+            f"`gh api repos/{repo.owner}/{repo.repo}/contents/{encoded_path}?ref={ref}` directly to "
+            "inspect the raw response."
+        ) from error
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        # The fetch above already succeeded: GitHub returned exactly the bytes at this path and
+        # ref. A decode failure here is a stable property of the file (it is binary, e.g. an
+        # image a wiki page legitimately cites), not a transport failure, so it must raise a
+        # type distinct from the plain LoreError a rate limit or network error would -- folding
+        # it into that generic type took down an --at-head answer over a legitimately cited
+        # binary file even though the retrieval itself worked.
+        raise FileNotTextAtRefError(
+            f"'{path}' in {repo.slug} at {ref} is not valid UTF-8 text (e.g. a binary file): {error}. "
+            "--at-head only supports text files."
         ) from error
 
 

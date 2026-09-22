@@ -156,9 +156,9 @@ def answer_from_result(
             citation's `ref` is set to this value mechanically, regardless of what the model
             submitted: the model is told the ref in the prompt, but this is what enforces it.
         at_head_files: Every cited file's fate when grounded via `--at-head` (included,
-            excluded for budget, or missing at head), mechanically derived by the caller from
-            what it actually retrieved. `None` (the default) becomes an empty list: this is
-            never populated from the model's own submission.
+            excluded for budget, missing at head, or not text at head), mechanically derived
+            by the caller from what it actually retrieved. `None` (the default) becomes an
+            empty list: this is never populated from the model's own submission.
 
     Returns:
         An `Answer` carrying the submitted text, citations, and unanswered parts, alongside

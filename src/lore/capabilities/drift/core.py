@@ -8,12 +8,38 @@ each page's own citations through `lore.drift`. No model is consulted.
 from lore import store
 from lore.capabilities.freshness import core as freshness_core
 from lore.drift import page_drift, report
-from lore.schemas import DriftReport, FileChange
+from lore.schemas import DriftReport, FileChange, RepoRef
 from lore.sources import github
 
 # One read per page, deliberately far larger than any real wiki page: `store.read_page` caps
 # and truncates by construction, and drift must see every citation on the page, not a slice.
 _FULL_PAGE_LIMIT = 100_000_000
+
+
+def changed_file_map(
+    ref: RepoRef, indexed_sha: str | None, head_sha: str | None, timeout_seconds: float = 60.0
+) -> tuple[dict[str, FileChange], bool]:
+    """Every file GitHub reports changed between `indexed_sha` and `head_sha`, keyed by filename.
+
+    The raw signal `drift()` intersects against each page's own citations. Factored out so any
+    other caller needing the same changed-file map (`explain --at-head`'s file ranking, for
+    instance) gets it through the one path that walks GitHub's compare API, rather than a second
+    copy of that walk.
+
+    Args:
+        ref: The repository to compare.
+        indexed_sha: The commit DeepWiki states it indexed, or None when unmeasured.
+        head_sha: The repository's live head commit, or None when unmeasured.
+        timeout_seconds: Per-request timeout for the GitHub compare call.
+
+    Returns:
+        `(changed_by_path, complete)`. Empty and `complete=False` when either commit is unknown:
+        an unmeasured commit means no comparison could be walked at all, not that nothing changed.
+    """
+    if indexed_sha is None or head_sha is None:
+        return {}, False
+    changes, complete = github.changed_files(ref, indexed_sha, head_sha, timeout_seconds=timeout_seconds)
+    return {change.filename: change for change in changes}, complete
 
 
 def drift(repo: str, page: int | str | None = None, timeout_seconds: float = 60.0) -> DriftReport:
@@ -40,13 +66,8 @@ def drift(repo: str, page: int | str | None = None, timeout_seconds: float = 60.
 
     indexed_sha = index.freshness.indexed_sha
     head_sha = index.freshness.head_sha
-    changed_by_path: dict[str, FileChange] = {}
-    changed_file_count = 0
-    complete = False
-    if indexed_sha is not None and head_sha is not None:
-        changes, complete = github.changed_files(ref, indexed_sha, head_sha, timeout_seconds=timeout_seconds)
-        changed_by_path = {change.filename: change for change in changes}
-        changed_file_count = len(changes)
+    changed_by_path, complete = changed_file_map(ref, indexed_sha, head_sha, timeout_seconds=timeout_seconds)
+    changed_file_count = len(changed_by_path)
 
     page_drifts = []
     for number in numbers:

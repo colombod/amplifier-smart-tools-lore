@@ -114,10 +114,12 @@ where `--material-file` is read and its contents passed as `material`; reading a
 CLI's own convenience, the library takes the content directly. Before synthesis, measures
 per-page drift for the cached wiki: a `broken` verdict exits non-zero naming the broken
 pages, the files, and how to proceed, before any model call is made. `--at-head` grounds on
-source read directly from the repository's head commit instead of the wiki, bounded by
-`--at-head-read-limit` total characters. Without `--json`, the caveat first when there is
-one, then the answer, then citations, then anything unanswered, then each `--at-head` file's
-status when present. With `--json`, the full `Answer` model.
+source read directly from the repository's head commit instead of the wiki, fetched in
+relevance order and bounded by `--at-head-read-limit` total characters. Without `--json`, the
+caveat first when there is one, then the answer, then citations, then anything unanswered,
+then each `--at-head` file's status when present: `included`, `excluded_for_budget`,
+`missing_at_head` (a confirmed 404), or `not_text` (fetched successfully but not valid UTF-8,
+e.g. a binary file). With `--json`, the full `Answer` model.
 
 ## lore howto
 

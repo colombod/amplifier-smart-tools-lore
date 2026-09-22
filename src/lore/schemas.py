@@ -17,11 +17,24 @@ class FileAbsentAtRefError(LoreError):
     """Raised only for a CONFIRMED 404: `path` genuinely does not exist at `ref`.
 
     Deliberately distinct from `LoreError` itself, which still covers every other retrieval
-    failure (network error, rate limit, malformed response, decode failure). A caller reading
-    a file at a ref needs to tell "this citation is stale, the file is gone" apart from "this
-    attempt to check failed" without parsing a message: the former is real information safe to
-    record and continue past; the latter is not evidence of anything and must fail loud instead
-    of being silently folded into the former.
+    failure (network error, rate limit, malformed response). A caller reading a file at a ref
+    needs to tell "this citation is stale, the file is gone" apart from "this attempt to check
+    failed" without parsing a message: the former is real information safe to record and
+    continue past; the latter is not evidence of anything and must fail loud instead of being
+    silently folded into the former.
+    """
+
+
+class FileNotTextAtRefError(LoreError):
+    """Raised only when `path` was fetched successfully at `ref` and is not valid UTF-8 text.
+
+    Deliberately distinct from `LoreError` itself: the fetch succeeded and GitHub returned
+    exactly the bytes at this path and ref, so a decode failure here is a stable property of
+    the file (it is binary, e.g. an image a wiki page legitimately cites), not evidence a
+    request went wrong. A caller reading a file at a ref needs to tell "this is binary, not a
+    retrieval problem" apart from "this attempt to read it failed" without parsing a message:
+    the former is safe to record and continue past, exactly like a confirmed 404; the latter is
+    not evidence of anything and must fail loud instead of being silently folded into the former.
     """
 
 
@@ -272,7 +285,7 @@ class Citation(BaseModel):
     )
 
 
-AtHeadFileVerdict = Literal["included", "excluded_for_budget", "missing_at_head"]
+AtHeadFileVerdict = Literal["included", "excluded_for_budget", "missing_at_head", "not_text"]
 
 
 class AtHeadFileStatus(BaseModel):
@@ -280,8 +293,9 @@ class AtHeadFileStatus(BaseModel):
 
     Populated mechanically by the library from what `--at-head` actually retrieved, never by
     the model: a caller must be able to tell which files actually grounded the answer, which
-    were left out for budget, and which no longer exist at head, rather than trusting the
-    model's own account of what it was given.
+    were left out for budget, which no longer exist at head, and which were fetched but are
+    not text (a binary file, e.g. an image), rather than trusting the model's own account of
+    what it was given.
     """
 
     path: str
@@ -306,7 +320,7 @@ class Answer(BaseModel):
         default_factory=list,
         description=(
             "Per-file fate when the answer was grounded via --at-head: included, excluded for "
-            "budget, or missing at head. Empty when --at-head was not used."
+            "budget, missing at head, or not text (a binary file). Empty when --at-head was not used."
         ),
     )
 

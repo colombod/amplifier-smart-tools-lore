@@ -18,7 +18,10 @@ with must still answer normally, however far behind the repository the broken pa
 look overall (`DriftReport.verdict` is a whole-wiki worst-page verdict; the right input to a
 per-question gate is the worst verdict among only the pages that ground THIS question).
 `--at-head` bypasses the wiki entirely and grounds the answer in the selected pages' cited
-files' own current content, read straight from the repository at its head commit.
+files' own current content, read straight from the repository at its head commit, fetched
+under a fixed character budget and in relevance order (`lore.selection.rank_cited_files`)
+rather than DeepWiki's own (alphabetical) citation order, so the budget is spent on the files
+most likely to matter rather than on whichever happen to sort first.
 """
 
 from lore import drift as lore_drift
@@ -104,7 +107,9 @@ def explain(
         at_head: Ground the answer in the cited files' own content, read directly from `repo`
             at its live head commit, instead of DeepWiki's index. Ignored when `material` is given.
         at_head_read_limit: Maximum total characters of head-commit source to fetch when
-            `at_head` is set; cited files past this budget are named as left out rather than fetched.
+            `at_head` is set; cited files are fetched in relevance order
+            (`lore.selection.rank_cited_files`) and files past this budget are named as left
+            out rather than fetched.
         intelligence: The implementation to run the synthesis through. Defaults to `default_intelligence()`.
 
     Returns:
@@ -112,8 +117,9 @@ def explain(
         material did not cover, the measured `Freshness`, and a `caveat`. With `at_head`, the
         reported `Freshness` describes the material actually used (the repository's live
         head), not the wiki's own staleness, and `at_head_files` names every cited file's
-        fate (included, excluded for budget, or missing at head), mechanically derived from
-        what was actually retrieved rather than the model's own account of it.
+        fate (included, excluded for budget, missing at head, or not text at head, i.e. a
+        binary file), mechanically derived from what was actually retrieved rather than the
+        model's own account of it.
 
     Raises:
         LoreError: `repo` does not parse, DeepWiki has no indexed wiki for it and no `material`
@@ -121,9 +127,10 @@ def explain(
             reports removed or renamed (naming the pages, the files, and how to proceed),
             `at_head` was requested but the repository's live head commit could not be read,
             an `at_head` fetch for a cited file failed for a reason other than a confirmed
-            404 (network error, rate limit, or malformed response -- this is never folded
-            into "missing", since it is not evidence the file is absent), the intelligence
-            implementation cannot run, or it produced no usable answer.
+            404 or a decode failure (network error, rate limit, or malformed response -- this
+            is never folded into "missing" or "not text", since it is not evidence about the
+            file itself), the intelligence implementation cannot run, or it produced no usable
+            answer.
     """
     engine = intelligence or default_intelligence()
     engine.preflight()
@@ -155,17 +162,26 @@ def explain(
         # directly from GitHub regardless (there is no staleness risk to guard against here,
         # unlike the drift gate below), so falling back to every cited file across the wiki is
         # a safe, conservative default rather than a hard failure.
-        cited = _cited_files(repo, selected or index.pages)
+        grounding_pages = selected or index.pages
+        cited = _cited_files(repo, grounding_pages)
         if not cited:
             raise LoreError(
                 f"'{repo}'s cached wiki cites no source files, so --at-head has nothing to fetch at head. "
                 "Rerun without --at-head to ground the answer in DeepWiki's own retrieval instead."
             )
-        included, excluded, missing = _fetch_at_head(ref, measured.head_sha, cited, at_head_read_limit, timeout_seconds)
-        prompt = build_prompt_at_head(repo, question, measured.head_sha, included, excluded, missing)
+        changed_by_path, _complete = drift_core.changed_file_map(
+            ref, measured.indexed_sha, measured.head_sha, timeout_seconds=min(timeout_seconds, 60.0)
+        )
+        ranked_cited = lore_selection.rank_cited_files(
+            question, cited, _page_texts(repo, grounding_pages), changed_by_path
+        )
+        included, excluded, missing, not_text = _fetch_at_head(
+            ref, measured.head_sha, ranked_cited, at_head_read_limit, timeout_seconds
+        )
+        prompt = build_prompt_at_head(repo, question, measured.head_sha, included, excluded, missing, not_text)
         freshness_for_answer = _at_head_freshness(measured)
         head_ref = measured.head_sha
-        at_head_files = _at_head_file_statuses(included, excluded, missing)
+        at_head_files = _at_head_file_statuses(included, excluded, missing, not_text)
     else:
         ref = freshness_core.parse_repo(repo)
         _ensure_cached(repo, ref, measured, timeout_seconds)
@@ -228,6 +244,15 @@ def _cited_files(repo: str, pages: list[PageEntry]) -> list[str]:
     return ordered
 
 
+def _page_texts(repo: str, pages: list[PageEntry]) -> list[str]:
+    """`pages`' own full text, read whole rather than through the tool's default bounded read.
+
+    What `rank_cited_files` searches for proximity between a citation and the question's terms;
+    a bounded read could truncate before reaching a citation near the end of a large page.
+    """
+    return [store.read_page(repo, entry.number, limit=_FULL_PAGE_LIMIT).text for entry in pages]
+
+
 def _scoped_drift(repo: str, whole_wiki_drift: DriftReport, selected: list[PageEntry]) -> DriftReport:
     """`whole_wiki_drift`, scoped to the pages actually selected as grounding the question.
 
@@ -286,7 +311,7 @@ def _read_selected_pages(repo: str, selected: list[PageEntry]) -> list[tuple[int
 
 def _fetch_at_head(
     ref: RepoRef, head_sha: str, cited_paths: list[str], read_limit: int, timeout_seconds: float
-) -> tuple[list[tuple[str, str]], list[str], list[str]]:
+) -> tuple[list[tuple[str, str]], list[str], list[str], list[str]]:
     """Fetch `cited_paths` at `head_sha`, bounded by `read_limit` total characters.
 
     Args:
@@ -297,23 +322,29 @@ def _fetch_at_head(
         timeout_seconds: Per-file timeout for the GitHub contents call.
 
     Returns:
-        `(included, excluded, missing)`. `included` is `(path, text)` pairs actually read, in
-        cited order, truncated if the last one would otherwise exceed `read_limit`. `excluded`
-        names paths never fetched because the budget was already spent. `missing` names paths
-        GitHub confirms with a 404 do not exist at `head_sha`, which is information about the
-        citation rather than a failure, and does not consume any of the budget.
+        `(included, excluded, missing, not_text)`. `included` is `(path, text)` pairs actually
+        read, in cited order, truncated if the last one would otherwise exceed `read_limit`.
+        `excluded` names paths never fetched because the budget was already spent. `missing`
+        names paths GitHub confirms with a 404 do not exist at `head_sha`, which is
+        information about the citation rather than a failure, and does not consume any of the
+        budget. `not_text` names paths GitHub fetched successfully whose content is not valid
+        UTF-8 (a binary file legitimately cited, e.g. an image); like `missing`, this is
+        information about the file rather than a failure, and does not consume any of the
+        budget.
 
     Raises:
-        LoreError: fetching a cited path failed for any reason OTHER than a confirmed 404
-            (network error, rate limit, malformed response). Such a failure is not evidence
-            the file is absent, and must never be silently folded into `missing`: a partial
-            result caused by a transport failure is a failure of this capability, not a
-            documented partial-completion outcome, and this fails the whole call rather than
-            answering from whatever fraction happened to be retrieved.
+        LoreError: fetching a cited path failed for any reason OTHER than a confirmed 404 or a
+            decode failure (network error, rate limit, malformed response). Such a failure is
+            not evidence about the file itself, and must never be silently folded into
+            `missing` or `not_text`: a partial result caused by a transport failure is a
+            failure of this capability, not a documented partial-completion outcome, and this
+            fails the whole call rather than answering from whatever fraction happened to be
+            retrieved.
     """
     included: list[tuple[str, str]] = []
     excluded: list[str] = []
     missing: list[str] = []
+    not_text: list[str] = []
     total_characters = 0
     for path in cited_paths:
         if total_characters >= read_limit:
@@ -323,6 +354,12 @@ def _fetch_at_head(
             text = github.file_at_ref(ref, path, head_sha, timeout_seconds=timeout_seconds)
         except github.FileAbsentAtRefError:
             missing.append(path)
+            continue
+        except github.FileNotTextAtRefError:
+            # The fetch succeeded: GitHub returned exactly what was asked for. Not being text
+            # is a stable property of the file, not a retrieval outcome, so this is recorded
+            # and the walk continues exactly like a confirmed 404, spending none of the budget.
+            not_text.append(path)
             continue
         except LoreError as error:
             raise LoreError(
@@ -334,25 +371,36 @@ def _fetch_at_head(
             ) from error
         remaining = read_limit - total_characters
         if len(text) > remaining:
+            # A file that does not fit is skipped so the next ones still get their chance,
+            # rather than truncated to fill the budget and starving everything after it.
+            # Measured: a 35,102 byte docs page ranked third consumed the rest of the budget
+            # and pushed out four small source files that would all have fitted. Truncation is
+            # kept for one case only, a first file larger than the whole budget, because
+            # returning part of it beats returning nothing at all. A skipped file is reported
+            # `excluded_for_budget` exactly as before, so nothing becomes invisible.
+            if included:
+                excluded.append(path)
+                continue
             text = text[:remaining]
         total_characters += len(text)
         included.append((path, text))
-    return included, excluded, missing
+    return included, excluded, missing, not_text
 
 
 def _at_head_file_statuses(
-    included: list[tuple[str, str]], excluded: list[str], missing: list[str]
+    included: list[tuple[str, str]], excluded: list[str], missing: list[str], not_text: list[str]
 ) -> list[AtHeadFileStatus]:
     """`_fetch_at_head`'s own return, restated as one mechanically-derived status per file.
 
     This is what makes a `--at-head` answer's provenance checkable rather than asserted: a
     caller can see exactly which cited files actually grounded the answer, which were left
-    out for budget, and which no longer exist at head, without trusting the model's account
-    of what it was given.
+    out for budget, which no longer exist at head, and which were fetched but are not text,
+    without trusting the model's account of what it was given.
     """
     statuses = [AtHeadFileStatus(path=path, status="included") for path, _ in included]
     statuses += [AtHeadFileStatus(path=path, status="excluded_for_budget") for path in excluded]
     statuses += [AtHeadFileStatus(path=path, status="missing_at_head") for path in missing]
+    statuses += [AtHeadFileStatus(path=path, status="not_text") for path in not_text]
     return statuses
 
 

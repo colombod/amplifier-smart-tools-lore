@@ -3,16 +3,18 @@
 A `DriftReport`'s verdict is the worst page in the whole cached wiki, which is the right read
 for `lore drift` reporting on the wiki as a whole, but the wrong scope for a gate about one
 question: a wiki with hundreds of pages and one broken page must not refuse every question,
-including ones that have nothing to do with that page. This module picks the pages that
+including ones that have nothing to do with that page. `select_pages` picks the pages that
 plausibly ground a question, by term overlap between the question and each page's title and
-body. It is a relevance heuristic for scoping a gate, not a search engine, and no model call is
-involved.
+body. `rank_cited_files` scores, but never drops, the files those pages cite, so a fixed fetch
+budget (`explain --at-head`) is spent on the files most likely to matter first rather than on
+whichever files happen to sort first alphabetically. Both are relevance heuristics for scoping
+or ordering, not a search engine, and no model call is involved in either.
 """
 
 import re
 
 from lore import store
-from lore.schemas import PageEntry, WikiIndex
+from lore.schemas import FileChange, PageEntry, WikiIndex
 
 # One read per page, deliberately far larger than any real wiki page: `store.read_page` caps
 # and truncates by construction, and scoring must see the whole page, not a slice. Matches
@@ -25,6 +27,17 @@ _FULL_PAGE_LIMIT = 100_000_000
 _TITLE_WEIGHT = 5
 
 _TERM_PATTERN = re.compile(r"[a-z0-9]+")
+
+# Characters of page text taken on each side of an occurrence of a cited path, when scoring how
+# closely question terms sit to that citation. Wide enough to catch the sentence (or the couple
+# of sentences) actually discussing the file, narrow enough that one occurrence's score cannot
+# leak into an unrelated paragraph describing a different file entirely.
+_PROXIMITY_WINDOW_CHARS = 300
+
+# Splits a path into its meaningful segments: runs between path separators (`/`, `_`, `-`, `.`),
+# further split on camelCase boundaries, so "packages/mcp/src/lib/sessionStore.ts" yields
+# "packages", "mcp", "src", "lib", "session", "Store", "ts" rather than one opaque token.
+_PATH_SEGMENT_PATTERN = re.compile(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])")
 
 # A short, general-purpose English stopword list, not a domain one: "server", "config", "api"
 # and the like are exactly the kind of word that should count toward a page's score.
@@ -177,3 +190,79 @@ def _score_page(terms: list[str], title: str, body: str) -> int:
 def _contains_term(text: str, term: str) -> bool:
     """Whether `term` appears in `text` as a whole word, not merely as a substring of a longer one."""
     return re.search(rf"\b{re.escape(term)}\b", text) is not None
+
+
+def rank_cited_files(
+    question: str, cited: list[str], page_texts: list[str], changes: dict[str, FileChange]
+) -> list[str]:
+    """`cited`, reordered by relevance to `question`: a permutation, never a filter.
+
+    `explain --at-head` fetches cited files under a fixed character budget; DeepWiki emits a
+    page's "Relevant source files" block alphabetically, so fetching in cited order spends that
+    budget on whichever files happen to sort first, not on the ones the question is actually
+    about. This reorders the same list so the budget is spent well. It can only ever change the
+    ORDER: a file this heuristic scores low can still be the one piece of evidence that matters,
+    so nothing here may ever drop a path from the return value. The only thing permitted to
+    remove a cited path from what actually gets fetched is the budget itself, downstream of this
+    function -- never a relevance judgment made here.
+
+    Scores each path by three signals, in this priority order:
+
+    1. How many distinct question terms appear near an occurrence of the path in `page_texts`.
+       Inline citations (`[path:12-40]()`) and "Relevant source files" bullets sit next to the
+       prose discussing that file, so text close to a citation is the strongest signal available
+       without fetching the file itself.
+    2. How many distinct question terms match one of the path's own segments, splitting on path
+       separators and camelCase (`sessionStore.ts` -> "session", "store", "ts"). This is what
+       lets a question about "sessions" favor `sessionStore.ts` even when the wiki page happens
+       to discuss it far from the citation itself.
+    3. The size of the change recorded for that path in `changes`, used only to break a tie left
+       by the two signals above: a heavily changed file is somewhat likelier to be what moved,
+       but this must never outrank an actual relevance signal.
+
+    Any tie remaining after all three keeps `cited`'s own order, so the result is deterministic
+    across repeated calls.
+
+    Args:
+        question: The question being answered; scored the same way `select_pages` scores it.
+        cited: The paths to rank, in their original cited order.
+        page_texts: Full text of the pages that cite them, searched for proximity to occurrences.
+        changes: Every file GitHub reports changed, keyed by filename; used only for the
+            change-size tiebreak. A path absent from `changes` scores 0 for that signal.
+
+    Returns:
+        `cited` reordered by descending relevance. Always a permutation of `cited`: same paths,
+        same count, in a new order -- never filtered, however irrelevant a path scores.
+    """
+    terms = _question_terms(question)
+    if not terms:
+        return list(cited)
+
+    def _rank_key(indexed: tuple[int, str]) -> tuple[int, int, int, int]:
+        index, path = indexed
+        proximity = _proximity_score(terms, path, page_texts)
+        path_score = _path_term_score(terms, path)
+        change_size = changes[path].changes if path in changes else 0
+        return (-proximity, -path_score, -change_size, index)
+
+    ranked = sorted(enumerate(cited), key=_rank_key)
+    return [path for _, path in ranked]
+
+
+def _proximity_score(terms: list[str], path: str, page_texts: list[str]) -> int:
+    """Sum, across every occurrence of `path` in `page_texts`, of distinct `terms` found nearby."""
+    pattern = re.compile(re.escape(path))
+    total = 0
+    for text in page_texts:
+        for match in pattern.finditer(text):
+            start = max(0, match.start() - _PROXIMITY_WINDOW_CHARS)
+            end = min(len(text), match.end() + _PROXIMITY_WINDOW_CHARS)
+            window = text[start:end].lower()
+            total += sum(1 for term in terms if _contains_term(window, term))
+    return total
+
+
+def _path_term_score(terms: list[str], path: str) -> int:
+    """How many distinct `terms` match one of `path`'s own segments (path separators, camelCase)."""
+    segments = {segment.lower() for segment in _PATH_SEGMENT_PATTERN.findall(path)}
+    return sum(1 for term in terms if term in segments)

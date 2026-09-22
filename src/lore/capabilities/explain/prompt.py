@@ -57,6 +57,7 @@ def build_prompt_at_head(
     included: list[tuple[str, str]],
     excluded: list[str],
     missing: list[str],
+    not_text: list[str],
 ) -> str:
     """The full prompt for one `explain --at-head` call: source read directly at the repository's head.
 
@@ -66,11 +67,14 @@ def build_prompt_at_head(
     Args:
         repo: The repository the question is about, as passed to `explain`.
         question: The question to answer.
-        head_sha: The commit `included` and `missing` were resolved against.
+        head_sha: The commit `included`, `missing`, and `not_text` were resolved against.
         included: `(path, text)` pairs actually fetched, in cited order, bounded by the read limit.
         excluded: Cited paths not fetched because the read limit was already spent.
         missing: Cited paths that no longer exist at `head_sha`; this is information about the
             citation, not a failure, and is reported to the model as such.
+        not_text: Cited paths fetched successfully at `head_sha` whose content is not valid
+            UTF-8 (a binary file, e.g. an image); like `missing`, this is information about
+            the file, not a failure, and is reported to the model as such.
 
     Returns:
         The prompt text, carrying `GROUNDING_RULE` and nothing outside what was retrieved.
@@ -91,6 +95,11 @@ def build_prompt_at_head(
         sections.append(
             "## Cited by the wiki but no longer exists at head (removed or renamed)\n"
             + "\n".join(f"- {path}" for path in missing)
+        )
+    if not_text:
+        sections.append(
+            "## Cited by the wiki but not text at head (a binary file, e.g. an image)\n"
+            + "\n".join(f"- {path}" for path in not_text)
         )
     sections.append(
         "This material was read directly from the repository at its head commit, not from "

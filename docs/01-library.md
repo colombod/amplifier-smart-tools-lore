@@ -277,7 +277,11 @@ def explain(
   supplied something to ground the answer in.
 - `at_head`: skip the wiki's own content entirely and ground the answer in the cited files'
   current content, read directly from `repo` at its live head commit via GitHub's contents
-  API. Ignored when `material` is given.
+  API. Cited files are fetched in relevance order (a no-model heuristic scoring proximity to
+  the question in the citing page's text, then a match against the file's own path segments),
+  not the alphabetical order DeepWiki's citations happen to list in, so the budget below is
+  spent on the files most likely to matter; this only ever reorders, never drops a file.
+  Ignored when `material` is given.
 - `at_head_read_limit`: maximum total characters of head-commit source to fetch when
   `at_head` is set; cited files past this budget are named as left out rather than fetched.
 
@@ -289,16 +293,17 @@ rests on), `unanswered` (parts of the question the retrieved material did not co
 `material` is given; with `at_head`, this instead reports the material as current, since it
 is the repository's own live head rather than the wiki's index), `caveat`, and
 `at_head_files` (empty except with `at_head`; each cited file's fate, mechanically derived,
-never asserted by the model: `included`, `excluded_for_budget`, or `missing_at_head` for a
-confirmed 404 -- the one documented partial-completion outcome of this capability). `caveat`
-is `None` when the pages grounding the answer are `intact` (or the material is at head),
-whatever the commit count; otherwise it names the measured commits and days the index trails
-the repository by. Raises `LoreError` when `repo` does not parse, DeepWiki has no indexed
-wiki for it and no `material` was supplied, a cached wiki page cites a file GitHub reports
-removed or renamed, `at_head` was requested but the repository's live head commit could not
-be measured, an `at_head` fetch fails for a reason other than a confirmed 404 (never folded
-into `missing_at_head`), the intelligence implementation cannot run, or it produced no usable
-answer.
+never asserted by the model: `included`, `excluded_for_budget`, `missing_at_head` for a
+confirmed 404, or `not_text` for a file fetched successfully whose content is not valid UTF-8
+(e.g. a binary file) -- the one documented partial-completion outcome of this capability).
+`caveat` is `None` when the pages grounding the answer are `intact` (or the material is at
+head), whatever the commit count; otherwise it names the measured commits and days the index
+trails the repository by. Raises `LoreError` when `repo` does not parse, DeepWiki has no
+indexed wiki for it and no `material` was supplied, a cached wiki page cites a file GitHub
+reports removed or renamed, `at_head` was requested but the repository's live head commit
+could not be measured, an `at_head` fetch fails for a reason other than a confirmed 404 or a
+decode failure (never folded into `missing_at_head` or `not_text`), the intelligence
+implementation cannot run, or it produced no usable answer.
 
 ## Howto
 
