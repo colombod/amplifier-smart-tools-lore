@@ -9,8 +9,8 @@ exception. A prerequisite the manifest declares optional (the Context7 API key, 
 reported as a failure when unsatisfied; anonymous Context7 access and the deterministic
 capabilities both work without it.
 
-`--timeout-seconds` bounds each individual probe (default `15.0`). Add `--json` to print the
-full `CheckResult` model instead of one line per prerequisite.
+`--timeout-seconds` bounds each individual probe (default `15.0`). Add `--json` (default
+`false`) to print the full `CheckResult` model instead of one line per prerequisite.
 
 ```bash
 lore check

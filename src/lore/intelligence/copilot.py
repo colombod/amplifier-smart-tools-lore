@@ -30,9 +30,13 @@ class CopilotIntelligence:
         """Checked up front, cheaply: `gh` is installed and a token can be minted.
 
         Not checked here: whether the account that token belongs to actually has a Copilot
-        subscription. There is no cheap way to learn that without a model call, so it is not
-        probed for. When the account lacks one, it surfaces on first use instead: `run` raises
-        a `LoreError` naming the `github-copilot-subscription` requirement.
+        subscription. Investigated: the SDK's schema defines `account.getQuota` for
+        account-level entitlement, but it is not implemented in the Copilot CLI runtime (the
+        SDK's own e2e suite skips its test for exactly that reason), and `models.list` /
+        `auth.getStatus` only confirm GitHub authentication, never a Copilot subscription
+        specifically. No cheap, reliable check for the subscription currently exists, so it is
+        not probed for. When the account lacks one, it surfaces on first use instead: `run`
+        raises a `LoreError` naming the `github-copilot-subscription` requirement.
         """
         self._github_token()
 

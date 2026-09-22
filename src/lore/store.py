@@ -12,6 +12,8 @@ from pathlib import Path
 import re
 import sys
 
+from pydantic import ValidationError
+
 from lore.schemas import (
     CHARS_PER_TOKEN,
     DEFAULT_READ_LIMIT,
@@ -127,7 +129,7 @@ def read_page(
     index = load_index(repo, indexed_sha)
     entry = _resolve_page(index, page)
     root = Path(index.root)
-    text = (root / entry.path).read_text(encoding="utf-8")
+    text = _read_cached_text(root / entry.path, repo, root)
 
     total_characters = len(text)
     # A start beyond the page end is a valid, honest answer (an empty slice), not an error.
@@ -174,7 +176,7 @@ def search_pages(
     hits: list[SearchHit] = []
     total_hits = 0
     for entry in index.pages:
-        text = (root / entry.path).read_text(encoding="utf-8")
+        text = _read_cached_text(root / entry.path, repo, root)
         for line_number, line in enumerate(text.splitlines(), start=1):
             if not regex.search(line):
                 continue
@@ -254,10 +256,34 @@ def _resolve_page(index: WikiIndex, page: int | str) -> PageEntry:
 
 
 def _read_index(path: Path, repo: str, indexed_sha: str | None) -> WikiIndex:
-    """Parse the index at `path`, or raise LoreError naming how to populate the cache."""
+    """Parse the index at `path`, or raise LoreError naming how to populate or repair the cache."""
     if not path.is_file():
         raise LoreError(_not_cached_message(repo, indexed_sha))
-    return WikiIndex.model_validate_json(path.read_text(encoding="utf-8"))
+    text = _read_cached_text(path, repo, path.parent)
+    try:
+        return WikiIndex.model_validate_json(text)
+    except ValidationError as error:
+        raise LoreError(
+            f"The cache entry at {path.parent} for '{repo}' has a corrupt index ({error}). Delete "
+            f"{path.parent} and rerun `lore fetch {repo} --refresh`."
+        ) from error
+
+
+def _read_cached_text(path: Path, repo: str, entry_root_path: Path) -> str:
+    """The text at `path`, inside the cache entry at `entry_root_path`, or raise LoreError naming how to repair it.
+
+    Once `load_index` has succeeded, reading a file it points at should never fail: a missing or
+    unreadable file means the cache entry was corrupted after it was written (a partial delete, a
+    permissions change, external interference), not a bug in this reader. That is named and made
+    recoverable rather than left as a raw OSError.
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise LoreError(
+            f"The cache entry at {entry_root_path} for '{repo}' is corrupt or unreadable "
+            f"({path.name}: {error}). Delete {entry_root_path} and rerun `lore fetch {repo} --refresh`."
+        ) from error
 
 
 def _not_cached_message(repo: str, indexed_sha: str | None = None) -> str:

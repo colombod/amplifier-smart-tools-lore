@@ -7,8 +7,8 @@ can do anything; those three are the only way back into what this writes.
 `REPO` is a GitHub repository, as `owner/name` or a full `https://github.com/owner/name` URL.
 `--refresh` refetches even when a cached index already exists for the commit DeepWiki
 currently reports as indexed (default: reuse the cache). `--timeout-seconds` bounds the
-DeepWiki call, which can carry megabytes of Markdown (default `180.0`). Add `--json` to print
-the full `WikiIndex` model instead of the page list.
+DeepWiki call, which can carry megabytes of Markdown (default `180.0`). Add `--json` (default
+`false`) to print the full `WikiIndex` model instead of the page list.
 
 ```bash
 lore fetch upstash/context7
@@ -21,10 +21,12 @@ index = fetch("upstash/context7")
 index.pages, index.total_estimated_tokens, index.freshness.verdict, index.from_cache
 ```
 
-Returns a `WikiIndex`: `pages` (`PageEntry` per page: `number`, `title`, `path`, `characters`,
-`estimated_tokens`), `total_characters`/`total_estimated_tokens`, `root` (the cache directory
-this index and its pages live under), `freshness` (this fetch's own measurement), and
-`from_cache`, `True` when this call reused an existing cache entry instead of refetching.
+Returns a `WikiIndex`: `repo` (echoed input), `source` (always `deepwiki`), `pages`
+(`PageEntry` per page: `number`, `title`, `path`, `characters`, `estimated_tokens`),
+`total_characters`/`total_estimated_tokens`, `root` (the cache directory this index and its
+pages live under), `freshness` (this fetch's own measurement), `fetched_at` (when this fetch
+ran, ISO 8601), and `from_cache`, `True` when this call reused an existing cache entry
+instead of refetching.
 
 ## Failures
 

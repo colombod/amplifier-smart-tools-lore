@@ -309,15 +309,17 @@ def _read_material_file(path: Path | None) -> str | None:
         return None
     try:
         return path.read_text(encoding="utf-8")
-    except OSError as error:
-        raise LoreError(f"Could not read --material-file {path}: {error}") from error
+    except (OSError, UnicodeDecodeError) as error:
+        raise LoreError(
+            f"Could not read --material-file {path}: {error}. Check that the path exists, is "
+            "readable, and is UTF-8 text."
+        ) from error
 
 
 def _echo_answer(result: Answer) -> None:
-    """Render an `Answer` for a person: the caveat first when there is one, then the answer, citations, unanswered."""
+    """Render an `Answer` for a person: a staleness caveat to stderr, then the answer, citations, and unanswered."""
     if result.caveat:
-        typer.echo(f"CAVEAT: {result.caveat}")
-        typer.echo("")
+        typer.echo(f"CAVEAT: {result.caveat}", err=True)
     typer.echo(result.answer)
     if result.citations:
         typer.echo("")

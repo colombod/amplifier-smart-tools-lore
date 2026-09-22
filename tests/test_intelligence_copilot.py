@@ -5,6 +5,16 @@ from lore.intelligence.copilot import CopilotIntelligence, _agent_result_for_fai
 from lore.schemas import LoreError
 
 
+def test_preflight_docstring_names_the_subscription_check_as_a_known_limitation() -> None:
+    """No cheap, reliable check for a Copilot subscription exists (see the docstring itself for
+    the evidence); this guards against that limitation quietly being dropped from the record."""
+    doc = CopilotIntelligence.preflight.__doc__ or ""
+
+    assert "Copilot subscription" in doc
+    assert "No cheap, reliable check" in doc
+    assert "github-copilot-subscription" in doc
+
+
 def test_github_token_failure_names_the_same_install_url_the_manifest_declares(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

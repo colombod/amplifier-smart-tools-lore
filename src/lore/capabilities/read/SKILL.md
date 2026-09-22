@@ -6,7 +6,7 @@ single call can return more than `--limit` characters, whatever the page's real 
 substring of a page title (e.g. `2` or `getting started`); an ambiguous substring is an error
 naming every title it matched. `--start` is the character offset to begin at (default `0`).
 `--limit` is the maximum characters to return (default `40000`, roughly 10,000 tokens). Add
-`--json` to print the full `ReadResult` model instead of the raw text.
+`--json` (default `false`) to print the full `ReadResult` model instead of the raw text.
 
 ```bash
 lore read upstash/context7 1 --start 0 --limit 4000
@@ -19,7 +19,8 @@ result = read("upstash/context7", 1, start=0, limit=4000)
 result.text, result.truncated, result.next_start
 ```
 
-Returns a `ReadResult`: `text` (the slice), `start`/`returned_characters`/`total_characters`,
+Returns a `ReadResult`: `repo`/`page_number`/`page_title`/`path` (which cached page this
+slice came from), `text` (the slice), `start`/`returned_characters`/`total_characters`,
 `truncated`, and, when truncated, `next_start` and `continuation`, the exact invocation that
 reads on from where this slice stopped.
 

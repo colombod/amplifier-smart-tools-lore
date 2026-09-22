@@ -100,9 +100,12 @@ Verify with `lore manifest`, which needs no credentials.
 
 Deterministic capabilities need only `uv`. Model-backed capabilities run through GitHub
 Copilot, signed in as the GitHub CLI's user: `gh` must be installed and `gh auth login`
-completed with an account that has a Copilot subscription. Without that, a model-backed
-capability fails immediately and names what to configure; it never falls back to a
-deterministic answer.
+completed with an account that has a Copilot subscription. A model-backed capability never
+falls back to a deterministic answer, and it names what to configure either way, but the two
+prerequisites are not detected at the same moment. A missing or signed-out `gh` fails
+immediately, before any retrieval. A missing Copilot entitlement surfaces only when the model
+call itself fails, after retrieval has already run, because the SDK exposes no cheap way to
+check entitlement up front.
 
 Runs on Linux, macOS, and Windows.
 

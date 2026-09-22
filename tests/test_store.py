@@ -109,6 +109,35 @@ def test_load_index_raises_a_named_command_when_nothing_cached() -> None:
         store.load_index("owner/repo")
 
 
+def test_load_index_with_a_corrupt_index_file_raises_a_lore_error_not_a_validation_error() -> None:
+    written = store.write_wiki("owner/repo", "# Page: One\nbody\n", _freshness("owner/repo"))
+    index_path = Path(written.root) / "index.json"
+    index_path.write_text("{ not valid json or a valid WikiIndex", encoding="utf-8")
+
+    with pytest.raises(LoreError, match=r"corrupt") as failure:
+        store.load_index("owner/repo")
+
+    assert "lore fetch owner/repo --refresh" in str(failure.value)
+
+
+def test_read_page_with_a_missing_page_file_raises_a_named_lore_error() -> None:
+    written = store.write_wiki("owner/repo", "# Page: One\nbody\n", _freshness("owner/repo"))
+    (Path(written.root) / written.pages[0].path).unlink()
+
+    with pytest.raises(LoreError, match=r"corrupt or unreadable") as failure:
+        store.read_page("owner/repo", 1)
+
+    assert "lore fetch owner/repo --refresh" in str(failure.value)
+
+
+def test_search_pages_with_a_missing_page_file_raises_a_named_lore_error() -> None:
+    written = store.write_wiki("owner/repo", "# Page: One\nbody\n", _freshness("owner/repo"))
+    (Path(written.root) / written.pages[0].path).unlink()
+
+    with pytest.raises(LoreError, match=r"corrupt or unreadable"):
+        store.search_pages("owner/repo", "body")
+
+
 def test_read_page_by_number_and_by_title_substring() -> None:
     store.write_wiki(
         "owner/repo",

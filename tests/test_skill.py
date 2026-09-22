@@ -149,6 +149,15 @@ def test_the_cli_exposes_exactly_the_capabilities_the_skill_lists() -> None:
     assert set(commands) == {capability.name for capability in CAPABILITIES}
 
 
+def test_explain_and_howto_skills_name_the_subscription_check_limitation() -> None:
+    """Neither capability can detect a missing Copilot subscription upfront; the skill must say so."""
+    for name in ("explain", "howto"):
+        document = lib.skill(name)
+
+        assert "github-copilot-subscription" in document
+        assert "not detected upfront" in document
+
+
 def test_every_capability_skill_documents_every_argument_the_cli_takes() -> None:
     commands = typer.main.get_group(app).commands
 

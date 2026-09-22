@@ -6,8 +6,8 @@ sources are independent, so a library covered by Context7 need not be on DeepWik
 
 `LIBRARY` is a library name to resolve, e.g. `context7` or `fastapi`. `TOPIC` focuses both the
 resolution and the fetched documentation, e.g. `routing`. `--timeout-seconds` bounds each of
-the two Context7 requests (default `60.0`). Add `--json` to print the full `DocsResult` model
-instead of the preview.
+the two Context7 requests (default `60.0`). Add `--json` (default `false`) to print the full
+`DocsResult` model instead of the preview.
 
 ```bash
 lore docs context7 "resolving a library id"
@@ -20,10 +20,11 @@ result = docs("context7", "resolving a library id")
 result.library.id, result.path, result.preview, result.truncated
 ```
 
-Returns a `DocsResult`: `library` (the resolved `LibraryRef`, id, title, and Context7's own
-freshness fields), `path` (where the full documentation was written), `characters`/
-`estimated_tokens`, `preview` (bounded to 2000 characters), and `truncated`, whether the
-preview is the whole document.
+Returns a `DocsResult`: `library` (the resolved `LibraryRef`: `id`, `title`, `description`,
+`last_update_date`, `state`, `total_tokens`, `total_snippets`, `stars`, `trust_score`,
+`benchmark_score`), `topic` (echoed input), `path` (where the full documentation was
+written), `characters`/`estimated_tokens`, `preview` (bounded to 2000 characters), and
+`truncated`, whether the preview is the whole document.
 
 ## Failures
 

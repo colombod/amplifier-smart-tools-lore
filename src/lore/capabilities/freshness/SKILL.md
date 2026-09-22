@@ -7,8 +7,8 @@ that knowledge is.
 
 `REPO` is a GitHub repository, as `owner/name` or a full `https://github.com/owner/name` URL
 (a trailing `.git` and any path past the repository name are ignored). `--timeout-seconds`
-bounds each of the two sources this consults (default `30.0`). Add `--json` to print the full
-`Freshness` model instead of the one-line summary.
+bounds each of the two sources this consults (default `30.0`). Add `--json` (default
+`false`) to print the full `Freshness` model instead of the one-line summary.
 
 ```bash
 lore freshness upstash/context7
@@ -21,12 +21,13 @@ result = freshness("upstash/context7")
 result.verdict, result.commits_behind, result.days_behind, result.summary
 ```
 
-Returns a `Freshness`: `indexed_sha`/`indexed_date` (what DeepWiki has), `head_sha`/`head_date`/
-`default_branch` (what GitHub has now), `commits_behind`/`days_behind` (the gap), `verdict`
-(`current`, `aging`, `stale`, or `unknown`), and `summary`, one line safe to show a person
-verbatim. `verdict` is `current` when `commits_behind` is `0`; `aging` when at most 25 commits
-and at most 30 days behind; `stale` past either bound; `unknown` when a signal could not be
-read, in which case `unmeasured` names each one and why.
+Returns a `Freshness`: `repo` (echoed input), `indexed_sha`/`indexed_date` (what DeepWiki
+has), `head_sha`/`head_date`/`default_branch` (what GitHub has now), `commits_behind`/
+`days_behind` (the gap), `verdict` (`current`, `aging`, `stale`, or `unknown`), `summary`,
+one line safe to show a person verbatim, and `measured_at`, when this measurement was taken
+(ISO 8601). `verdict` is `current` when `commits_behind` is `0`; `aging` when at most 25
+commits and at most 30 days behind; `stale` past either bound; `unknown` when a signal could
+not be read, in which case `unmeasured` names each one and why.
 
 ## Failures
 
