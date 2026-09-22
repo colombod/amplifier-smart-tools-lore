@@ -13,7 +13,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from lore.intelligence.schemas import AgentResult
-from lore.schemas import Answer, Citation, DriftReport, Freshness, LoreError
+from lore.schemas import Answer, AtHeadFileStatus, Citation, DriftReport, Freshness, LoreError
 
 GROUNDING_RULE = (
     "GROUNDING RULE: you may use ONLY the material retrieved above, and nothing you remember "
@@ -141,6 +141,7 @@ def answer_from_result(
     freshness: Freshness,
     drift_report: DriftReport | None = None,
     head_ref: str | None = None,
+    at_head_files: list[AtHeadFileStatus] | None = None,
 ) -> Answer:
     """Build the `Answer` a model-backed capability returns, from one completed agent run.
 
@@ -154,10 +155,14 @@ def answer_from_result(
         head_ref: The commit citations sourced `at_head` were read at. When given, every such
             citation's `ref` is set to this value mechanically, regardless of what the model
             submitted: the model is told the ref in the prompt, but this is what enforces it.
+        at_head_files: Every cited file's fate when grounded via `--at-head` (included,
+            excluded for budget, or missing at head), mechanically derived by the caller from
+            what it actually retrieved. `None` (the default) becomes an empty list: this is
+            never populated from the model's own submission.
 
     Returns:
         An `Answer` carrying the submitted text, citations, and unanswered parts, alongside
-        `freshness` and the `caveat` derived from it.
+        `freshness`, the `caveat` derived from it, and `at_head_files`.
 
     Raises:
         LoreError: the run failed, or its structured output is missing, malformed, or carries an empty answer.
@@ -196,4 +201,5 @@ def answer_from_result(
         unanswered=unanswered,
         freshness=freshness,
         caveat=caveat_for_drift(freshness, drift_report),
+        at_head_files=at_head_files or [],
     )

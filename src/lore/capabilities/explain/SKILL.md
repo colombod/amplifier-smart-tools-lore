@@ -27,9 +27,16 @@ question those broken pages have nothing to do with must still answer normally.
 `--at-head` skips the wiki's own content entirely and grounds the answer in the SELECTED
 pages' cited files' current content, read directly from the repository at its head commit
 through GitHub's contents API, bounded by `--at-head-read-limit` total characters across
-every file combined; files past that budget are named as left out, and a cited file no
-longer at head is reported as information, not a failure. Citations grounded this way carry
-source `at_head` and the head commit they were read at.
+every file combined. Every cited file ends up in exactly one of three states, mechanically
+recorded in `at_head_files` rather than asserted: `included` (fetched and used),
+`excluded_for_budget` (left out once the read limit was spent), or `missing_at_head` (GitHub
+confirms with a 404 that the file no longer exists there -- information about the citation,
+not a failure). This is the one documented partial-completion outcome of this capability: a
+run that ends with some files `missing_at_head` or `excluded_for_budget` still answers, and
+says exactly which files those were. Any OTHER retrieval failure (a network error, a rate
+limit, a malformed response) is never folded into `missing_at_head` -- it fails the whole
+call instead, since it is not evidence the file is absent. Citations grounded via `--at-head`
+carry source `at_head` and the head commit they were read at.
 
 `REPO` is a GitHub repository, as `owner/name` or a full `https://github.com/owner/name`
 URL. `QUESTION` is a question about the repository's architecture, design, or wiring.
@@ -64,7 +71,9 @@ or `caller` when grounded in `--material-file` instead, and the page, file, or m
 claim rests on), `unanswered` (parts of the question the retrieved material did not cover),
 `freshness` (the measurement `freshness` would report for `REPO`, still measured with
 `--material-file`; with `--at-head`, this instead reports the material as current, since it
-is the repository's own live head rather than the wiki's index), and `caveat`. `caveat` is
+is the repository's own live head rather than the wiki's index), `caveat`, and
+`at_head_files` (empty except with `--at-head`; each cited file's `included` /
+`excluded_for_budget` / `missing_at_head` fate, described above). `caveat` is
 `None` when the pages grounding the answer are `intact` (or the material is at head),
 whatever the commit count, and otherwise names the measured commits and days the index
 trails the repository by, so a stale index is never silently trusted.
@@ -75,7 +84,9 @@ Raises `LoreError` when `REPO` does not parse, when DeepWiki has no indexed wiki
 (naming the `deepwiki.com` URL to visit to have it indexed), when a cached wiki page cites a
 file GitHub reports removed or renamed (naming the pages, the files, and how to proceed),
 when `--at-head` was requested but the repository's live head commit could not be measured,
-when `gh` is not installed or not signed in (naming what to run), or when it produces no
-usable structured answer. A signed-in account lacking a Copilot subscription is not detected upfront:
-no cheap check exists for it, so it surfaces only once the model call itself fails,
-naming `github-copilot-subscription` to install.
+when an `--at-head` fetch for a cited file fails for a reason other than a confirmed 404
+(network error, rate limit, malformed response -- never silently reported as
+`missing_at_head`), when `gh` is not installed or not signed in (naming what to run), or when
+it produces no usable structured answer. A signed-in account lacking a Copilot subscription is
+not detected upfront: no cheap check exists for it, so it surfaces only once the model call
+itself fails, naming `github-copilot-subscription` to install.

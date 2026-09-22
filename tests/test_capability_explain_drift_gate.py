@@ -228,7 +228,9 @@ def test_at_head_reports_a_file_missing_at_head_as_information_not_a_failure(
     monkeypatch.setattr(core.deepwiki, "ask", lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
 
     def _missing(ref: object, path: str, ref_sha: str, timeout_seconds: float = 30.0) -> str:
-        raise LoreError(f"'{path}' does not exist in owner/repo at {ref_sha}. It may have been removed or renamed.")
+        raise core.github.FileAbsentAtRefError(
+            f"'{path}' does not exist in owner/repo at {ref_sha}. It may have been removed or renamed."
+        )
 
     monkeypatch.setattr(core.github, "file_at_ref", _missing)
     engine = _RecordingIntelligence()
@@ -239,6 +241,56 @@ def test_at_head_reports_a_file_missing_at_head_as_information_not_a_failure(
     assert "no longer exists at head" in prompt
     assert "packages/mcp/src/lib/sessionStore.ts" in prompt
     assert answer.freshness.verdict == "current"
+    assert answer.at_head_files == [
+        core.AtHeadFileStatus(path="packages/mcp/src/lib/sessionStore.ts", status="missing_at_head")
+    ]
+
+
+def test_at_head_fails_the_whole_call_when_a_fetch_fails_for_a_reason_other_than_a_confirmed_404(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The load-bearing regression: a rate limit or dropped connection must never be silently
+
+    reclassified as 'file missing' and answered around. Only a confirmed 404 may continue.
+    """
+    freshness = _freshness(indexed_sha="abc123", head_sha="def456", verdict="stale")
+    store.write_wiki("owner/repo", WIKI_TEXT, freshness)
+    _patch_measure(monkeypatch, freshness)
+    monkeypatch.setattr(core.deepwiki, "read_wiki_structure", lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
+    monkeypatch.setattr(core.deepwiki, "ask", lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
+
+    def _rate_limited(ref: object, path: str, ref_sha: str, timeout_seconds: float = 30.0) -> str:
+        raise LoreError("Could not read owner/repo's 'x' at def456: HTTP 403: API rate limit exceeded")
+
+    monkeypatch.setattr(core.github, "file_at_ref", _rate_limited)
+
+    with pytest.raises(LoreError) as excinfo:
+        core.explain(
+            "owner/repo",
+            "How does the session store work?",
+            at_head=True,
+            intelligence=_RunMustNotBeCalledIntelligence(),
+        )
+
+    message = str(excinfo.value)
+    assert "packages/mcp/src/lib/sessionStore.ts" in message
+    assert "def456" in message
+    assert "not proof the file is absent" in message
+
+
+def test_at_head_file_statuses_classifies_each_list_into_its_own_status() -> None:
+    statuses = core._at_head_file_statuses(
+        included=[("a.py", "text a"), ("b.py", "text b")],
+        excluded=["c.py"],
+        missing=["d.py"],
+    )
+
+    assert statuses == [
+        core.AtHeadFileStatus(path="a.py", status="included"),
+        core.AtHeadFileStatus(path="b.py", status="included"),
+        core.AtHeadFileStatus(path="c.py", status="excluded_for_budget"),
+        core.AtHeadFileStatus(path="d.py", status="missing_at_head"),
+    ]
 
 
 def test_at_head_raises_before_any_model_call_when_the_live_head_commit_is_unmeasured(

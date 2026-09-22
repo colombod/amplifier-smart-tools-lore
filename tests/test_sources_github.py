@@ -4,7 +4,7 @@ from typing import Any
 import httpx
 import pytest
 
-from lore.schemas import LoreError, RepoRef
+from lore.schemas import FileAbsentAtRefError, LoreError, RepoRef
 from lore.sources import github
 
 REPO = RepoRef(owner="upstash", repo="context7")
@@ -154,6 +154,31 @@ def test_file_at_ref_raises_a_named_error_when_the_path_is_gone(monkeypatch: pyt
         github.file_at_ref(REPO, "gone.py", "main")
 
 
+def test_file_at_ref_raises_the_distinct_absent_type_only_for_a_confirmed_404(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller must be able to tell a confirmed absence apart from any other failure by type."""
+    monkeypatch.setattr(github, "_get", lambda path, timeout_seconds: (httpx.codes.NOT_FOUND, {"message": "Not Found"}))
+
+    with pytest.raises(FileAbsentAtRefError):
+        github.file_at_ref(REPO, "gone.py", "main")
+
+
+def test_file_at_ref_raises_the_plain_base_type_not_the_absent_type_for_a_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The load-bearing distinction: a rate limit (or any non-404 failure) is not 'file absent'."""
+    monkeypatch.setattr(
+        github, "_get", lambda path, timeout_seconds: (httpx.codes.FORBIDDEN, {"message": "rate limited"})
+    )
+
+    with pytest.raises(LoreError) as excinfo:
+        github.file_at_ref(REPO, "a.py", "main")
+
+    assert not isinstance(excinfo.value, FileAbsentAtRefError)
+    assert "retry" in str(excinfo.value).lower()
+
+
 def test_file_at_ref_raises_when_the_response_carries_no_base64_content(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         github, "_get", lambda path, timeout_seconds: (httpx.codes.OK, {"content": "not-base64-flagged"})
@@ -161,3 +186,20 @@ def test_file_at_ref_raises_when_the_response_carries_no_base64_content(monkeypa
 
     with pytest.raises(LoreError, match="did not carry base64 content"):
         github.file_at_ref(REPO, "a.py", "main")
+
+
+def test_get_via_http_names_a_remedy_when_the_request_itself_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeClient:
+        def __enter__(self) -> "_FakeClient":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def get(self, url: str, headers: dict[str, str]) -> Any:
+            raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(github.httpx, "Client", lambda timeout: _FakeClient())
+
+    with pytest.raises(LoreError, match="gh auth login"):
+        github._get_via_http("repos/owner/repo", 5.0)

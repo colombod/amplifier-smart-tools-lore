@@ -35,6 +35,7 @@ from lore.schemas import (
     DEFAULT_INTELLIGENCE_MODEL,
     DEFAULT_READ_LIMIT,
     Answer,
+    AtHeadFileStatus,
     DriftReport,
     Freshness,
     LoreError,
@@ -110,14 +111,19 @@ def explain(
         An `Answer` carrying the synthesized text, its citations, anything the retrieved
         material did not cover, the measured `Freshness`, and a `caveat`. With `at_head`, the
         reported `Freshness` describes the material actually used (the repository's live
-        head), not the wiki's own staleness.
+        head), not the wiki's own staleness, and `at_head_files` names every cited file's
+        fate (included, excluded for budget, or missing at head), mechanically derived from
+        what was actually retrieved rather than the model's own account of it.
 
     Raises:
         LoreError: `repo` does not parse, DeepWiki has no indexed wiki for it and no `material`
             was supplied, a page selected as grounding the question cites a file GitHub
             reports removed or renamed (naming the pages, the files, and how to proceed),
             `at_head` was requested but the repository's live head commit could not be read,
-            the intelligence implementation cannot run, or it produced no usable answer.
+            an `at_head` fetch for a cited file failed for a reason other than a confirmed
+            404 (network error, rate limit, or malformed response -- this is never folded
+            into "missing", since it is not evidence the file is absent), the intelligence
+            implementation cannot run, or it produced no usable answer.
     """
     engine = intelligence or default_intelligence()
     engine.preflight()
@@ -131,6 +137,7 @@ def explain(
     drift_report: DriftReport | None = None
     head_ref: str | None = None
     freshness_for_answer = measured
+    at_head_files: list[AtHeadFileStatus] = []
 
     if material is not None:
         prompt = build_prompt_from_material(repo, question, material)
@@ -158,6 +165,7 @@ def explain(
         prompt = build_prompt_at_head(repo, question, measured.head_sha, included, excluded, missing)
         freshness_for_answer = _at_head_freshness(measured)
         head_ref = measured.head_sha
+        at_head_files = _at_head_file_statuses(included, excluded, missing)
     else:
         ref = freshness_core.parse_repo(repo)
         _ensure_cached(repo, ref, measured, timeout_seconds)
@@ -181,7 +189,13 @@ def explain(
     )
     result = engine.run(request)
     return answer_from_result(
-        question, repo, result, freshness_for_answer, drift_report=drift_report, head_ref=head_ref
+        question,
+        repo,
+        result,
+        freshness_for_answer,
+        drift_report=drift_report,
+        head_ref=head_ref,
+        at_head_files=at_head_files,
     )
 
 
@@ -286,8 +300,16 @@ def _fetch_at_head(
         `(included, excluded, missing)`. `included` is `(path, text)` pairs actually read, in
         cited order, truncated if the last one would otherwise exceed `read_limit`. `excluded`
         names paths never fetched because the budget was already spent. `missing` names paths
-        that do not exist at `head_sha`, which is information about the citation rather than
-        a failure, and does not consume any of the budget.
+        GitHub confirms with a 404 do not exist at `head_sha`, which is information about the
+        citation rather than a failure, and does not consume any of the budget.
+
+    Raises:
+        LoreError: fetching a cited path failed for any reason OTHER than a confirmed 404
+            (network error, rate limit, malformed response). Such a failure is not evidence
+            the file is absent, and must never be silently folded into `missing`: a partial
+            result caused by a transport failure is a failure of this capability, not a
+            documented partial-completion outcome, and this fails the whole call rather than
+            answering from whatever fraction happened to be retrieved.
     """
     included: list[tuple[str, str]] = []
     excluded: list[str] = []
@@ -299,15 +321,39 @@ def _fetch_at_head(
             continue
         try:
             text = github.file_at_ref(ref, path, head_sha, timeout_seconds=timeout_seconds)
-        except LoreError:
+        except github.FileAbsentAtRefError:
             missing.append(path)
             continue
+        except LoreError as error:
+            raise LoreError(
+                f"Could not fetch '{path}' from {ref.slug} at {head_sha} for --at-head: {error} This is "
+                "a retrieval failure (network error, rate limit, or a malformed response), not proof "
+                "the file is absent, so the answer was not synthesized from a partial result. Retry; "
+                "if GitHub keeps rate-limiting anonymous requests, authenticate with `gh auth login` "
+                "or set GITHUB_TOKEN first."
+            ) from error
         remaining = read_limit - total_characters
         if len(text) > remaining:
             text = text[:remaining]
         total_characters += len(text)
         included.append((path, text))
     return included, excluded, missing
+
+
+def _at_head_file_statuses(
+    included: list[tuple[str, str]], excluded: list[str], missing: list[str]
+) -> list[AtHeadFileStatus]:
+    """`_fetch_at_head`'s own return, restated as one mechanically-derived status per file.
+
+    This is what makes a `--at-head` answer's provenance checkable rather than asserted: a
+    caller can see exactly which cited files actually grounded the answer, which were left
+    out for budget, and which no longer exist at head, without trusting the model's account
+    of what it was given.
+    """
+    statuses = [AtHeadFileStatus(path=path, status="included") for path, _ in included]
+    statuses += [AtHeadFileStatus(path=path, status="excluded_for_budget") for path in excluded]
+    statuses += [AtHeadFileStatus(path=path, status="missing_at_head") for path in missing]
+    return statuses
 
 
 def _at_head_freshness(measured: Freshness) -> Freshness:

@@ -44,6 +44,9 @@ def cache_root() -> Path:
     else:
         root = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "lore"
 
+    # A relative LORE_CACHE_DIR (or a relative XDG_CACHE_HOME) must not leave the artifact
+    # locations this tool reports dependent on the caller's current working directory.
+    root = root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     return root
 

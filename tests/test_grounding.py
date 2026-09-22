@@ -2,7 +2,7 @@ import pytest
 
 from lore import grounding
 from lore.intelligence.schemas import AgentResult
-from lore.schemas import Citation, DriftReport, Freshness, LoreError
+from lore.schemas import AtHeadFileStatus, Citation, DriftReport, Freshness, LoreError
 
 
 def _freshness(verdict: str, **overrides: object) -> Freshness:
@@ -281,3 +281,36 @@ def test_answer_from_result_leaves_citations_untouched_when_head_ref_is_not_give
     answer = grounding.answer_from_result("q", "owner/repo", result, freshness)
 
     assert answer.citations[0].ref is None
+
+
+def test_answer_from_result_defaults_at_head_files_to_an_empty_list() -> None:
+    freshness = _freshness("current")
+    result = AgentResult(output={"answer": "ok", "citations": [], "unanswered": []})
+
+    answer = grounding.answer_from_result("q", "owner/repo", result, freshness)
+
+    assert answer.at_head_files == []
+
+
+def test_answer_from_result_carries_the_at_head_files_it_was_given_mechanically() -> None:
+    """This is set by the caller from what was actually retrieved, never from the model's output."""
+    freshness = _freshness("current")
+    result = AgentResult(
+        output={
+            "answer": "ok",
+            "citations": [],
+            "unanswered": [],
+            # A model claiming its own at_head_files must have no effect: the field isn't even
+            # part of the output schema, and the library sets it from its own bookkeeping.
+            "at_head_files": [{"path": "ignored-by-model.py", "status": "included"}],
+        }
+    )
+    statuses = [
+        AtHeadFileStatus(path="src/module.py", status="included"),
+        AtHeadFileStatus(path="src/big.py", status="excluded_for_budget"),
+        AtHeadFileStatus(path="src/gone.py", status="missing_at_head"),
+    ]
+
+    answer = grounding.answer_from_result("q", "owner/repo", result, freshness, at_head_files=statuses)
+
+    assert answer.at_head_files == statuses

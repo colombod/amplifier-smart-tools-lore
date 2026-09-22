@@ -116,8 +116,8 @@ per-page drift for the cached wiki: a `broken` verdict exits non-zero naming the
 pages, the files, and how to proceed, before any model call is made. `--at-head` grounds on
 source read directly from the repository's head commit instead of the wiki, bounded by
 `--at-head-read-limit` total characters. Without `--json`, the caveat first when there is
-one, then the answer, then citations, then anything unanswered. With `--json`, the full
-`Answer` model.
+one, then the answer, then citations, then anything unanswered, then each `--at-head` file's
+status when present. With `--json`, the full `Answer` model.
 
 ## lore howto
 

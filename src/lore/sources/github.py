@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 import httpx
 
-from lore.schemas import FileChange, FileStatus, LoreError, RepoRef
+from lore.schemas import FileAbsentAtRefError, FileChange, FileStatus, LoreError, RepoRef
 
 API_BASE = "https://api.github.com"
 TOKEN_ENV = "GITHUB_TOKEN"
@@ -31,10 +31,17 @@ def default_branch(repo: RepoRef, timeout_seconds: float = 30.0) -> str:
     """The name of `repo`'s default branch."""
     status, body = _get(f"repos/{repo.owner}/{repo.repo}", timeout_seconds)
     if status != httpx.codes.OK:
-        raise LoreError(f"Could not read {repo.slug}'s default branch: {_error_detail(status, body)}")
+        raise LoreError(
+            f"Could not read {repo.slug}'s default branch: {_error_detail(status, body)}. Confirm the "
+            "repository exists and is public, or retry if GitHub is rate-limiting the request; "
+            "authenticate with `gh auth login` or set GITHUB_TOKEN to raise anonymous rate limits."
+        )
     branch = body.get("default_branch") if isinstance(body, dict) else None
     if not branch:
-        raise LoreError(f"GitHub's response for {repo.slug} did not carry a default_branch.")
+        raise LoreError(
+            f"GitHub's response for {repo.slug} did not carry a default_branch. Retry; if it keeps "
+            f"happening, run `gh api repos/{repo.owner}/{repo.repo}` directly to inspect the raw response."
+        )
     return branch
 
 
@@ -42,10 +49,18 @@ def head_commit(repo: RepoRef, branch: str, timeout_seconds: float = 30.0) -> tu
     """The sha and committer date at the head of `branch`."""
     status, body = _get(f"repos/{repo.owner}/{repo.repo}/commits/{branch}", timeout_seconds)
     if status != httpx.codes.OK:
-        raise LoreError(f"Could not read {repo.slug}'s head of '{branch}': {_error_detail(status, body)}")
+        raise LoreError(
+            f"Could not read {repo.slug}'s head of '{branch}': {_error_detail(status, body)}. Confirm "
+            "the branch name is correct, or retry if GitHub is rate-limiting the request; authenticate "
+            "with `gh auth login` or set GITHUB_TOKEN to raise anonymous rate limits."
+        )
     sha, date = _head_commit_from_json(body) if isinstance(body, dict) else (None, None)
     if sha is None or date is None:
-        raise LoreError(f"GitHub's response for {repo.slug}@{branch} did not carry a commit sha and date.")
+        raise LoreError(
+            f"GitHub's response for {repo.slug}@{branch} did not carry a commit sha and date. Retry; "
+            f"if it keeps happening, run `gh api repos/{repo.owner}/{repo.repo}/commits/{branch}` "
+            "directly to inspect the raw response."
+        )
     return sha, date
 
 
@@ -69,7 +84,10 @@ def repository_exists(repo: RepoRef, timeout_seconds: float = 30.0) -> bool:
         return True
     if status == httpx.codes.NOT_FOUND:
         return False
-    raise LoreError(f"Could not tell whether {repo.slug} exists: {_error_detail(status, body)}")
+    raise LoreError(
+        f"Could not tell whether {repo.slug} exists: {_error_detail(status, body)}. Retry; if GitHub "
+        "is rate-limiting anonymous requests, authenticate with `gh auth login` or set GITHUB_TOKEN."
+    )
 
 
 def changed_files(
@@ -101,21 +119,39 @@ def file_at_ref(repo: RepoRef, path: str, ref: str, timeout_seconds: float = 30.
     """The text of `path` in `repo` at `ref`, decoded from GitHub's contents API.
 
     Raises:
-        LoreError: `path` does not exist at `ref`, or the response could not be read or decoded.
+        FileAbsentAtRefError: GitHub confirms with a 404 that `path` does not exist at `ref`.
+            A caller (see `explain --at-head`) may treat this, and only this, as information
+            about the citation rather than a retrieval failure.
+        LoreError: any other failure: a non-200/404 status, a rate limit, a network error, or a
+            response that could not be read or decoded. None of these are evidence the file is
+            absent, and a caller must not reclassify them as such.
     """
     encoded_path = "/".join(quote(segment, safe="") for segment in path.split("/"))
     status, body = _get(f"repos/{repo.owner}/{repo.repo}/contents/{encoded_path}?ref={ref}", timeout_seconds)
     if status == httpx.codes.NOT_FOUND:
-        raise LoreError(f"'{path}' does not exist in {repo.slug} at {ref}. It may have been removed or renamed.")
+        raise FileAbsentAtRefError(
+            f"'{path}' does not exist in {repo.slug} at {ref}. It may have been removed or renamed."
+        )
     if status != httpx.codes.OK or not isinstance(body, dict):
-        raise LoreError(f"Could not read {repo.slug}'s '{path}' at {ref}: {_error_detail(status, body)}")
+        raise LoreError(
+            f"Could not read {repo.slug}'s '{path}' at {ref}: {_error_detail(status, body)}. Retry; if "
+            "GitHub is rate-limiting anonymous requests, authenticate with `gh auth login` or set "
+            "GITHUB_TOKEN."
+        )
     content = body.get("content")
     if not isinstance(content, str) or body.get("encoding") != "base64":
-        raise LoreError(f"GitHub's response for {repo.slug}'s '{path}' at {ref} did not carry base64 content.")
+        raise LoreError(
+            f"GitHub's response for {repo.slug}'s '{path}' at {ref} did not carry base64 content. Retry; "
+            f"if it keeps happening, run `gh api repos/{repo.owner}/{repo.repo}/contents/{encoded_path}"
+            f"?ref={ref}` directly to inspect the raw response."
+        )
     try:
         return base64.b64decode(content).decode("utf-8")
     except (binascii.Error, UnicodeDecodeError) as error:
-        raise LoreError(f"Could not decode {repo.slug}'s '{path}' at {ref}: {error}") from error
+        raise LoreError(
+            f"Could not decode {repo.slug}'s '{path}' at {ref}: {error}. The file may not be valid "
+            "UTF-8 text (e.g. a binary file); --at-head only supports text files."
+        ) from error
 
 
 def _file_change(entry: dict[str, Any]) -> FileChange:
@@ -186,7 +222,11 @@ def _get_via_http(path: str, timeout_seconds: float) -> tuple[int, Any]:
         with httpx.Client(timeout=_timeout(timeout_seconds)) as client:
             response = client.get(f"{API_BASE}/{path}", headers=headers)
     except httpx.HTTPError as error:
-        raise LoreError(f"GitHub request to {path} failed: {error}") from error
+        raise LoreError(
+            f"GitHub request to {path} failed: {error}. Retry the call, check network connectivity, or "
+            "(if GitHub is rate-limiting anonymous requests) authenticate with `gh auth login` or set "
+            "GITHUB_TOKEN before rerunning."
+        ) from error
     try:
         body: Any = response.json()
     except ValueError:

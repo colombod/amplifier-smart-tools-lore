@@ -13,6 +13,18 @@ class LoreError(Exception):
     """Raised for any failure the library can name and explain how to fix."""
 
 
+class FileAbsentAtRefError(LoreError):
+    """Raised only for a CONFIRMED 404: `path` genuinely does not exist at `ref`.
+
+    Deliberately distinct from `LoreError` itself, which still covers every other retrieval
+    failure (network error, rate limit, malformed response, decode failure). A caller reading
+    a file at a ref needs to tell "this citation is stale, the file is gone" apart from "this
+    attempt to check failed" without parsing a message: the former is real information safe to
+    record and continue past; the latter is not evidence of anything and must fail loud instead
+    of being silently folded into the former.
+    """
+
+
 # region: Manifest
 
 
@@ -260,6 +272,22 @@ class Citation(BaseModel):
     )
 
 
+AtHeadFileVerdict = Literal["included", "excluded_for_budget", "missing_at_head"]
+
+
+class AtHeadFileStatus(BaseModel):
+    """One cited file's fate when `explain --at-head` fetched cited files directly from GitHub.
+
+    Populated mechanically by the library from what `--at-head` actually retrieved, never by
+    the model: a caller must be able to tell which files actually grounded the answer, which
+    were left out for budget, and which no longer exist at head, rather than trusting the
+    model's own account of what it was given.
+    """
+
+    path: str
+    status: AtHeadFileVerdict
+
+
 class Answer(BaseModel):
     """What a model-backed capability returns: the answer, its sources, and its age."""
 
@@ -273,6 +301,13 @@ class Answer(BaseModel):
     freshness: Freshness
     caveat: str | None = Field(
         default=None, description="Staleness warning to show with the answer, when the index trails the repository"
+    )
+    at_head_files: list[AtHeadFileStatus] = Field(
+        default_factory=list,
+        description=(
+            "Per-file fate when the answer was grounded via --at-head: included, excluded for "
+            "budget, or missing at head. Empty when --at-head was not used."
+        ),
     )
 
 

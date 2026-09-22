@@ -373,6 +373,11 @@ def _echo_answer(result: Answer) -> None:
         typer.echo("Unanswered:")
         for item in result.unanswered:
             typer.echo(f"  - {item}")
+    if result.at_head_files:
+        typer.echo("")
+        typer.echo("At-head file status:")
+        for entry in result.at_head_files:
+            typer.echo(f"  [{entry.status}] {entry.path}")
 
 
 def _page_argument(value: str) -> int | str:

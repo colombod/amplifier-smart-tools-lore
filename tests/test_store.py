@@ -30,6 +30,20 @@ def test_cache_root_uses_the_env_override_and_creates_it(cache_dir) -> None:
     assert root.is_dir()
 
 
+def test_cache_root_resolves_a_relative_env_override_to_an_absolute_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A relative LORE_CACHE_DIR must not leave the reported cache root cwd-dependent."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LORE_CACHE_DIR", "relative-cache-dir")
+
+    root = store.cache_root()
+
+    assert root.is_absolute()
+    assert root == tmp_path / "relative-cache-dir"
+    assert root.is_dir()
+
+
 def test_entry_root_keys_on_repo_and_indexed_sha() -> None:
     root = store.entry_root("owner/repo", "deadbeef")
 
